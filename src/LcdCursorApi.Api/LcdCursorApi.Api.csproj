@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>LcdCursorApi.Api</AssemblyName>
+    <RootNamespace>LcdCursorApi</RootNamespace>
+    <!-- The contract assembly. Consumers reference this and nothing else, so it must not
+         drag in engine types: everything here is BCL-only by design. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="DeployApi" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DeployDir)" ContinueOnError="true" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(DeployDir)" ContinueOnError="true" />
+  </Target>
+</Project>

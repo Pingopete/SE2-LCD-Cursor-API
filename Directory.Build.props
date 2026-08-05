@@ -1,0 +1,18 @@
+<Project>
+  <!-- Machine-specific paths. Override without editing this file:
+         dotnet build /p:SE2Dir=... /p:DeployDir=...
+       or set the matching environment variables. -->
+  <PropertyGroup>
+    <SE2Dir Condition="'$(SE2Dir)' == ''">E:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2</SE2Dir>
+    <SE2ContentDir Condition="'$(SE2ContentDir)' == ''">E:\SteamLibrary\steamapps\common\SpaceEngineers2\GameData\Vanilla\Content</SE2ContentDir>
+    <DeployDir Condition="'$(DeployDir)' == ''">D:\SE2LcdCursor</DeployDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+</Project>

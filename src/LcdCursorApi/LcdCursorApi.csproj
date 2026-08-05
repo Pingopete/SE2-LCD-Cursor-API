@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>LcdCursorApi</AssemblyName>
+    <RootNamespace>LcdCursorApi.Host</RootNamespace>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 2.4.x required: 2.3.3 fails on .NET 9 ("LocalBuilder abstract class"). -->
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+    <ProjectReference Include="..\LcdCursorApi.Api\LcdCursorApi.Api.csproj" />
+  </ItemGroup>
+
+  <!-- The bootstrap loads once at game start, so the running copy is moved aside rather
+       than overwritten while the process still holds it. -->
+  <Target Name="DeployPlugin" AfterTargets="Build">
+    <Delete Files="$(DeployDir)\LcdCursorApi.old.dll" ContinueOnError="true" />
+    <Move SourceFiles="$(DeployDir)\LcdCursorApi.dll" DestinationFiles="$(DeployDir)\LcdCursorApi.old.dll" Condition="Exists('$(DeployDir)\LcdCursorApi.dll')" ContinueOnError="true" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DeployDir)" ContinueOnError="true" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(DeployDir)" ContinueOnError="true" />
+    <Copy SourceFiles="$(TargetDir)0Harmony.dll" DestinationFolder="$(DeployDir)" Condition="Exists('$(TargetDir)0Harmony.dll')" ContinueOnError="true" />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="VRage.Library"><HintPath>$(SE2Dir)\VRage.Library.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Core"><HintPath>$(SE2Dir)\VRage.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Core.Game"><HintPath>$(SE2Dir)\VRage.Core.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.DCS"><HintPath>$(SE2Dir)\VRage.DCS.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Render"><HintPath>$(SE2Dir)\VRage.Render.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Game2.Simulation"><HintPath>$(SE2Dir)\Game2.Simulation.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Game2.Client"><HintPath>$(SE2Dir)\Game2.Client.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Game2.Game"><HintPath>$(SE2Dir)\Game2.Game.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

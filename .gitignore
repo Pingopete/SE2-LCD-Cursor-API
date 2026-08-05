@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+
+# Runtime artifacts: logs, baked-but-unreviewed catalogs, scratch dumps
+output/
+*.log
+scratch/
