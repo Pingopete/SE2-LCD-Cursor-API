@@ -68,8 +68,18 @@ public sealed class CatalogSurface
 /// <summary>All LCD surfaces on one block subtype.</summary>
 public sealed class CatalogBlock
 {
-    /// <summary>Block definition subtype key, e.g. <c>LCDFlat250</c>.</summary>
-    public string Subtype { get; set; }
+    /// <summary>
+    /// The block definition's GUID, as it appears in the shipped <c>.def</c> file. The key.
+    /// </summary>
+    /// <remarks>
+    /// Not the <c>DebugName</c>. That is the composition name — <c>LCDFlat150_ServerComposition</c>
+    /// — shared by every block of a model, and using it as an identity is what let two tagged
+    /// panels collide on one key in the RTT work.
+    /// </remarks>
+    public string BlockGuid { get; set; }
+
+    /// <summary>Definition debug name. Written so a human can read the catalog; never matched on.</summary>
+    public string DebugName { get; set; }
 
     /// <summary>Model file the quads were measured from, for traceability across game updates.</summary>
     public string ModelPath { get; set; }

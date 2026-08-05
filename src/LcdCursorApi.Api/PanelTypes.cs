@@ -49,18 +49,33 @@ public readonly struct PanelInfo
     public readonly int Width;
     public readonly int Height;
     public readonly float AspectRatio;
-    /// <summary>Block definition subtype, e.g. the key this panel's catalog entry was baked under.</summary>
-    public readonly string BlockSubtype;
+
+    /// <summary>
+    /// The block definition's GUID — the key this panel's catalog entry was baked under.
+    /// </summary>
+    /// <remarks>
+    /// Definitions are GUID-identified (<c>Definition.Guid</c>, matching the <c>"Guid"</c> in the
+    /// shipped <c>.def</c> files). That is the stable key: <c>DebugName</c> is the block's
+    /// *composition* name and is shared by every block of a model, so it identifies a type at
+    /// best and collides in every other use.
+    /// </remarks>
+    public readonly Guid BlockGuid;
+
+    /// <summary>Human-readable definition name. For logs and diagnostics; never a key.</summary>
+    public readonly string BlockName;
+
     /// <summary>False when no catalog entry matched and a user calibration is supplying the mapping.</summary>
     public readonly bool FromCatalog;
 
-    public PanelInfo(PanelId id, int width, int height, float aspectRatio, string blockSubtype, bool fromCatalog)
+    public PanelInfo(PanelId id, int width, int height, float aspectRatio,
+                     Guid blockGuid, string blockName, bool fromCatalog)
     {
         Id = id;
         Width = width;
         Height = height;
         AspectRatio = aspectRatio;
-        BlockSubtype = blockSubtype;
+        BlockGuid = blockGuid;
+        BlockName = blockName;
         FromCatalog = fromCatalog;
     }
 }

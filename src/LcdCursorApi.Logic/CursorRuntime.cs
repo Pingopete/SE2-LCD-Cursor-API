@@ -18,24 +18,63 @@ internal sealed class CursorRuntime : ILcdCursorRuntime
     public CursorHit Current => _current;
     public CursorMode Mode => _modes.Mode;
 
+    /// <summary>Minimum gap between cursor resolves, in ms. ~120 Hz.</summary>
+    private const long FrameIntervalMs = 8;
+
+    private long _lastFrame;
+    private int _frameBusy;
+
     public void Start()
     {
         CatalogStore.EnsureLoaded();
         PanelRegistry.Attach(_panels);
+        HostBridge.LcdTickHook = OnRenderTick;
     }
 
     public void Stop()
     {
+        HostBridge.LcdTickHook = null;
         PanelRegistry.Detach();
         _modes.ForceRelease();
     }
 
-    public void Tick()
+    /// <summary>
+    /// Housekeeping, from the bootstrap's 2-second worker. Deliberately not where the cursor
+    /// is resolved — a cursor updated twice a second is not a cursor.
+    /// </summary>
+    public void Tick() => EngineLocator.Poll();
+
+    /// <summary>
+    /// The per-frame path, off the LCD render tick.
+    /// </summary>
+    /// <remarks>
+    /// <para>The hook fires once per <i>panel</i> per frame, not once per frame, so the work is
+    /// rate-limited and guarded against re-entry rather than run on every call. With several
+    /// panels in view the difference is a multiple, not a rounding error.</para>
+    ///
+    /// <para>This runs on the render thread. Everything here must stay cheap and must not
+    /// block — which is why <see cref="Log"/> queues rather than writes, a synchronous write
+    /// from this thread having been measured at 110-178 ms in this engine. Consumer callbacks
+    /// are dispatched on this thread too, which is usually what a consumer wants since it is
+    /// where they draw, but it does mean a slow subscriber costs frame time.</para>
+    /// </remarks>
+    private void OnRenderTick(object renderComponent)
     {
-        // Placeholder for the per-frame resolve; see PanelRegistry / AimResolver for the
-        // engine-facing half. Kept separate so this class stays about state, not lookups.
-        var hit = AimResolver.Resolve(_modes, _panels);
-        Publish(hit);
+        try
+        {
+            PanelRegistry.Observe(renderComponent);
+
+            long now = Environment.TickCount64;
+            if (now - _lastFrame < FrameIntervalMs) return;
+            if (Interlocked.CompareExchange(ref _frameBusy, 1, 0) != 0) return;
+            try
+            {
+                _lastFrame = now;
+                Publish(AimResolver.Resolve(_modes));
+            }
+            finally { Interlocked.Exchange(ref _frameBusy, 0); }
+        }
+        catch (Exception e) { Log.Error("render tick", e); }
     }
 
     /// <summary>

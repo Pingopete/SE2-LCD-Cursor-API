@@ -12,11 +12,10 @@ internal static class CatalogStore
 {
     private const string FileName = "lcd-catalog.json";
 
-    private static readonly Dictionary<string, CatalogBlock> BySubtype =
-        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<Guid, CatalogBlock> ByGuid = new();
     private static bool _loaded;
 
-    public static int BlockCount => BySubtype.Count;
+    public static int BlockCount => ByGuid.Count;
 
     public static void EnsureLoaded()
     {
@@ -42,19 +41,23 @@ internal static class CatalogStore
                 return;
             }
 
+            int skipped = 0;
             foreach (var b in catalog.Blocks)
-                if (!string.IsNullOrEmpty(b.Subtype))
-                    BySubtype[b.Subtype] = b;
+            {
+                if (Guid.TryParse(b.BlockGuid, out var g)) ByGuid[g] = b;
+                else skipped++;
+            }
 
-            Log.Line($"Catalog loaded: {BySubtype.Count} block subtype(s), baked from game build '{catalog.GameBuild}'.");
+            Log.Line($"Catalog loaded: {ByGuid.Count} block(s), baked from game build '{catalog.GameBuild}'."
+                   + (skipped > 0 ? $" {skipped} entr(ies) skipped: unparseable BlockGuid." : ""));
         }
         catch (Exception e) { Log.Error("catalog load", e); }
     }
 
-    public static bool TryGet(string subtype, int surfaceIndex, out CatalogSurface surface)
+    public static bool TryGet(Guid blockGuid, int surfaceIndex, out CatalogSurface surface)
     {
         surface = null;
-        if (string.IsNullOrEmpty(subtype) || !BySubtype.TryGetValue(subtype, out var block)) return false;
+        if (!ByGuid.TryGetValue(blockGuid, out var block)) return false;
         foreach (var s in block.Surfaces)
             if (s.SurfaceIndex == surfaceIndex) { surface = s; return true; }
         return false;
