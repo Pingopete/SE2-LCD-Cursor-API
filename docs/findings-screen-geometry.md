@@ -106,10 +106,12 @@ So an offline baker would have to reimplement the VR3B container and its compres
 is a real reverse-engineering project with an ongoing maintenance cost every time the format
 moves.
 
-## The route taken
+## The route taken — superseded, see the next section
 
-**Bake the catalog from inside the game**, where the VFS already decodes VR3B, and ship the
-result as data.
+The plan below was to **bake the catalog from inside the game**, where the VFS already decodes
+VR3B, and ship the result as data. That is still the fallback, but it turned out to be
+unnecessary for stock blocks: the screen placement is already in the block definition. Keep
+reading.
 
 1. A dev-only bake command walks the `LcdMultiPanelDefinition`s, and for each block subtype
    loads its model through the engine's own file handles, selects the mesh part named by the
@@ -122,6 +124,50 @@ result as data.
 
 Calibration survives only as the fallback for modded panels with no catalog entry — which is
 where it belongs, and it is now the exception rather than the standard path.
+
+## The screen placement is in the definition all along
+
+Chasing the model path turned up something better. `…_BlockModelDefinition.def` carries a list
+of **dummies** — named transform-plus-scale markers baked into the block — and every LCD block
+has one named `LcdPanel`:
+
+| Block | Dummy scale | Ratio | Declared AspectRatio |
+|---|---|---|---|
+| LCD flat 2.5m | 2.5 x 2.5 x 0.2 | 1.0 | 1.0 |
+| LCD flat 0.5m | 0.5 x 0.5 x 0.2 | 1.0 | 1.0 |
+| Corner LCD 2.5m | 2.5 x 0.5 x 0.5 | **5.0** | **5** |
+| Wide LCD 1.5m | 1.5 x 1.25 x 0.2 | 1.2 | 1.33 |
+
+The corner LCD is the one that settles it. A 2.5 x 0.5 box is a ratio of exactly 5.0, matching
+a declared aspect of 5 that nothing else in the file would predict.
+
+And it is reachable at runtime, which is the part that matters. `BlockModelComponent.Definition`
+derives from `ModelComponentDefinition`, which exposes
+`DummiesByType : ListDictionaryReader<DummyTypeDefinition, ModelDummy>`. (It does not appear on
+`BlockModelComponentDefinition`'s own member list — it is inherited, which is exactly the kind of
+absence that is easy to mistake for "not there".) `ModelDummy` is
+`{ Name, RelativeTransformWithEulerHint Transform, Vector3 Scale, DummyTypeDefinition Type }` with
+`GetMatrix()` returning `Matrix.CreateFromTransformScale(Orientation, Position, Scale)` — a full
+TRS for a unit box.
+
+So the screen's position, orientation and size come out of the definition directly. **No model
+parsing, no VR3B, no bake step, and no catalog for stock blocks.**
+
+### What is not yet confirmed
+
+The wide LCD's 1.2 against a declared 1.33 is unexplained. Either the visible glass is inset
+within the dummy box, or the declared aspect is a rounded 4:3 the geometry does not honour.
+Separately, the same dummy feeds an interaction collider — `DummyShapedEntityDetectorComponent`
+takes `_halfExtents` from it — and a detection volume usually carries margin over the thing it
+detects. Both point the same way: the box may be a little larger than the glass.
+
+That is why the catalog survives as an **override** rather than being deleted. If measurement
+shows a consistent inset, it is stored per block type as a correction — a much smaller problem
+than deriving the quad by hand, and measured once per block type rather than once per placement.
+
+The `LcdPanel` dummy is matched by **name**, not by its type GUID (`b15d441f-…`). The name is
+stable and legible in the logs; the GUID would be one more magic constant to keep in step with
+the game.
 
 ## Cross-checks and incidental findings
 

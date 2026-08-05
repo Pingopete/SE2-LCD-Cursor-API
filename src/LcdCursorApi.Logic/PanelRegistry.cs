@@ -123,6 +123,9 @@ internal static class PanelRegistry
         }
 
         int registered = 0, uncatalogued = 0;
+        // The dummy is per block, not per surface: built at most once here.
+        ScreenQuad dummyQuad = null;
+        string dummyNote = null;
         foreach (var s in surfaces)
         {
             if (s is not LcdPanelSurfaceContext ctx) continue;
@@ -135,15 +138,20 @@ internal static class PanelRegistry
             var id = new PanelId(entityId, index);
             int w = surfaceDef.Resolution.X, h = surfaceDef.Resolution.Y;
 
-            bool fromCatalog = CatalogStore.TryGet(blockGuid, index, out var catalogSurface);
-            if (!fromCatalog) uncatalogued++;
+            // Catalog first as an override, then the block's own LcdPanel dummy. The dummy is
+            // the normal source; a catalog entry exists only where measurement showed the
+            // dummy box and the visible glass disagree.
+            var quad = CatalogStore.TryGet(blockGuid, index, out var catalogSurface)
+                ? catalogSurface.Quad
+                : (dummyQuad ??= DummyQuadSource.TryBuild(block, out dummyNote));
+            if (quad == null) uncatalogued++;
 
-            panels[id] = new PanelInfo(id, w, h, surfaceDef.AspectRatio, blockGuid, debugName, fromCatalog);
+            panels[id] = new PanelInfo(id, w, h, surfaceDef.AspectRatio, blockGuid, debugName, quad != null);
             Entries[id] = new PanelEntry
             {
                 Id = id,
                 Block = block,
-                Quad = catalogSurface?.Quad,
+                Quad = quad,
                 Width = w,
                 Height = h,
             };
@@ -152,7 +160,9 @@ internal static class PanelRegistry
 
         if (registered > 0)
             Log.Line($"Registered '{debugName}' ({entityId}): {registered} surface(s)"
-                   + (uncatalogued > 0 ? $", {uncatalogued} with no catalog entry (needs calibration)." : "."));
+                   + (uncatalogued > 0
+                        ? $", {uncatalogued} with no quad ({dummyNote ?? "no source"}) — needs calibration."
+                        : "."));
     }
 
     private static readonly ConcurrentDictionary<Guid, byte> WarnedGuids = new();

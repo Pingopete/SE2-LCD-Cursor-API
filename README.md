@@ -11,9 +11,8 @@ panel geometry by hand.
 ## What it does
 
 - **Exact surface coordinates.** A view ray becomes a `(u, v)` in `[0,1]` and a pixel
-  position in the panel's own render-target space, using screen geometry baked per block
-  subtype from the block's actual mesh part — not a bounding-box approximation with a
-  hand-tuned inset.
+  position in the panel's own render-target space, using the screen placement the block
+  definition already carries — not a bounding-box approximation with a hand-tuned inset.
 - **Two cursor modes.** Head aim by default. Alt+RightClick latches a decoupled mode where
   mouse movement drives the cursor instead of the camera; holding Alt alone gives the same
   thing momentarily.
@@ -30,8 +29,7 @@ panel geometry by hand.
 | `src/LcdCursorApi.Api` | The contract. BCL-only. **This is the only assembly a consumer references.** |
 | `src/LcdCursorApi` | Plugin bootstrap: `IPlugin`, Harmony patches, hot-reload host. |
 | `src/LcdCursorApi.Logic` | The implementation, hot-reloaded into a collectible load context. |
-| `tools/CatalogBaker` | Dev-only in-game bake of the screen-geometry catalog. *Not written yet.* |
-| `catalog/lcd-catalog.json` | The baked catalog, reviewed and committed as data. *Not baked yet.* |
+| `catalog/lcd-catalog.json` | Optional per-block corrections. Not needed for stock blocks. *None yet.* |
 | `docs/` | Design notes and the investigation behind them. |
 
 ## Status
@@ -42,11 +40,16 @@ Nothing here has been run in game yet. What is finished and building:
 - The plugin bootstrap: Harmony patches, hot-reload host, glow suppression.
 - `ScreenQuadSolver` — the runtime projection.
 - `CursorModeMachine` — the head-aim / decoupled mode logic and its escapes.
-- `BlockFrame` — world ray to block model space, the transform that lets one catalog entry
-  serve every placement of a subtype.
+- `BlockFrame` — world ray to block model space.
+- `DummyQuadSource` — the screen quad, read live from the block's own `LcdPanel` dummy.
+- `PanelRegistry` — panel discovery off the LCD render tick.
+- `AimResolver` — camera ray, nearest-panel resolve, input.
 
-What is scaffolded and explicitly marked unverified in the source: `PanelRegistry`,
-`AimResolver`, `Calibration`, and the catalog baker.
+Still a marked stub: `Calibration` (the fallback for modded panels).
+
+**The known gap** is that decoupled cursor mode reads mouse movement but does not yet withhold
+it from the camera, so the view will turn while the cursor moves. The mode machine and its
+escapes are done; the input suppression patch is not.
 
 ## Using it from a mod
 
