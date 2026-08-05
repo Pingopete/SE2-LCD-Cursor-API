@@ -135,6 +135,20 @@ internal static class CursorOverlay
     /// From the render tick: force a repaint of this component's surfaces while any of them
     /// is carrying the cursor.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Driven by where the cursor IS, not by where it last drew.</b> The obvious
+    /// version keys off a set populated in <see cref="OnRender"/> — repaint the panels we
+    /// recently drew on. That version works right up until the chain breaks once, and then
+    /// never recovers: no repaint means no render, no render means no draw, no draw means
+    /// nothing re-arms the repaint. The panel goes dead and stays dead until something
+    /// outside this loop makes the engine render it — in testing, toggling the display mode
+    /// off and back on.</para>
+    ///
+    /// <para>That is this codebase's recurring bug: state that can only change while the
+    /// thing it controls is already working. The aim resolve does not depend on the panel
+    /// re-rendering — <c>TickFsrMask</c> fires per frame regardless — so asking it where the
+    /// cursor is breaks the circularity and the loop becomes self-starting.</para>
+    /// </remarks>
     public static void DriveRepaint(object renderComponent, Array surfaces)
     {
         if (!Enabled || renderComponent == null || surfaces == null) return;
@@ -150,15 +164,37 @@ internal static class CursorOverlay
             }
             if (_rebuild == null) return;
 
-            long now = Environment.TickCount64;
+            var rt = _runtime;
+            if (rt == null) return;
 
+            long now = Environment.TickCount64;
+            var hit = rt.Current;
+
+            // Is the cursor on one of THIS component's surfaces right now?
             bool anyActive = false;
-            foreach (var s in surfaces)
+            if (hit.IsValid)
             {
-                if (s == null) continue;
-                if (!Tracked.TryGetValue(s, out var touched)) continue;
-                if (now - touched > TrackTimeoutMs) { Tracked.TryRemove(s, out _); continue; }
-                anyActive = true;
+                foreach (var s in surfaces)
+                {
+                    if (s == null) continue;
+                    if (!PanelRegistry.TryGetByContext(s, out var id) || id != hit.Panel) continue;
+                    Tracked[s] = now;
+                    anyActive = true;
+                    break;
+                }
+            }
+
+            // Keep going briefly after it leaves, so the frame that erases the crosshair is
+            // actually rendered. Without this the cursor stays burned onto the panel.
+            if (!anyActive)
+            {
+                foreach (var s in surfaces)
+                {
+                    if (s == null) continue;
+                    if (!Tracked.TryGetValue(s, out var touched)) continue;
+                    if (now - touched > TrackTimeoutMs) { Tracked.TryRemove(s, out _); continue; }
+                    anyActive = true;
+                }
             }
             if (!anyActive) return;
 
