@@ -135,4 +135,38 @@ where it belongs, and it is now the exception rather than the standard path.
 - The quad must be stored in **model space**, not relative to the block's grid AABB. A
   catalog entry is per block subtype, and an AABB-relative offset changes with the block's
   rotation in the grid — which is precisely why the prototype's calibration is per placement
-  rather than per block type.
+  rather than per block type. See below for the transform that makes this work.
+
+## Getting into model space
+
+This was briefly written up as an open question — "`CubeBlockComponent.AABB` gives cells, not
+an orientation" — on the basis that the GS2 prototype works in grid space off the AABB and
+calibrates per placement. That was too quick a conclusion: GS2 had already solved it, in
+`BlockShapes.BasisOf`, and the engine exposes the transform more directly still.
+
+`CubeBlockComponent` carries a `ChildTransformComponent` whose `ChildTransform` is a
+`RelativeTransform` — `{ Vector3 Position, Quaternion Orientation }`, the block relative to
+its grid. So the whole chain is engine-provided, with no basis matrix assembled by hand:
+
+```
+world  --WorldTransform.TransformInv(grid.GetWorldTransform(Vector3I.Zero))-->  grid-local metres
+       --RelativeTransform.TransformInv(childTransform)-->                      block model space
+```
+
+Directions use the `…DirectionInv` variants at both steps. Applying the positional inverse to
+a direction gives a cursor that drifts with distance from the grid origin — correct near the
+origin, visibly wrong at the far end of a large ship, which is a nasty shape of bug to chase.
+
+Two details worth keeping:
+
+- **`Base6Directions.GetVector(Direction)`** already maps a direction to a vector.
+  `BlockShapes.DirVec` switches on `dir.ToString()`, which allocates on a per-block path;
+  there is no need to carry that over.
+- **`IntegerOrientation` derives `Right` itself** (`get_Right()` via `GetOppositeDirection`),
+  so the manual `Up × Forward` cross product in `BasisOf` is not needed either.
+
+`BlockFrame.OrientationDisagreementDegrees` cross-checks the quaternion against the block's
+`IntegerOrientation`, which is exact by construction. They must agree; if they ever do not,
+the assumption that `ChildTransform` is block-relative-to-grid is wrong — an intermediate
+hierarchy node would do it — and the failure mode is a cursor that looks plausibly placed and
+is consistently off, which is exactly the kind of thing that survives casual testing.

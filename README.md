@@ -42,16 +42,11 @@ Nothing here has been run in game yet. What is finished and building:
 - The plugin bootstrap: Harmony patches, hot-reload host, glow suppression.
 - `ScreenQuadSolver` — the runtime projection.
 - `CursorModeMachine` — the head-aim / decoupled mode logic and its escapes.
+- `BlockFrame` — world ray to block model space, the transform that lets one catalog entry
+  serve every placement of a subtype.
 
 What is scaffolded and explicitly marked unverified in the source: `PanelRegistry`,
 `AimResolver`, `Calibration`, and the catalog baker.
-
-**The one open question blocking the catalog** is the block's model-to-grid orientation. A
-catalog entry is per block subtype and therefore lives in model space, so resolving a hit
-needs the block's rotation within its grid. `CubeBlockComponent.AABB` gives cells, not an
-orientation, and the GS2 prototype avoids the problem by calibrating per placement. Until
-that transform is located, only panels in a default orientation would resolve — which is the
-sort of gap that looks like success until someone rotates a panel.
 
 ## Using it from a mod
 
