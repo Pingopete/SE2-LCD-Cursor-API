@@ -39,12 +39,27 @@ internal static class PanelRegistry
 
     private static readonly ConcurrentDictionary<PanelId, PanelEntry> Entries = new();
 
-    /// <summary>Blocks already examined, so the expensive path runs once each.</summary>
-    private static readonly ConcurrentDictionary<long, byte> SeenBlocks = new();
+    /// <summary>
+    /// Surface context to panel, so the render hook — which is handed only a context — can
+    /// tell which panel it is drawing into.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the context object itself, and it is the presence of a context in this map
+    /// that decides whether a surface needs registering. The engine re-creates contexts (on
+    /// material state changes, on streaming), and a block-level "already seen" guard would
+    /// skip the re-registration and leave the map stale — a panel that worked until something
+    /// made the engine rebuild it, which is a miserable thing to debug.
+    /// </remarks>
+    private static readonly ConcurrentDictionary<object, PanelId> CtxToPanel = new();
+
+    /// <summary>Blocks whose one-off diagnostics have already run.</summary>
+    private static readonly ConcurrentDictionary<Guid, byte> WarnedGuids = new();
 
     public static ICollection<PanelEntry> Live => Entries.Values;
 
     public static bool TryGet(PanelId id, out PanelEntry entry) => Entries.TryGetValue(id, out entry);
+
+    public static bool TryGetByContext(object ctx, out PanelId id) => CtxToPanel.TryGetValue(ctx, out id);
 
     public static void Attach(ConcurrentDictionary<PanelId, PanelInfo> panels) => _panels = panels;
 
@@ -52,7 +67,8 @@ internal static class PanelRegistry
     {
         _panels = null;
         Entries.Clear();
-        SeenBlocks.Clear();
+        CtxToPanel.Clear();
+        WarnedGuids.Clear();
     }
 
     // Private fields on the render component, resolved once. Reflection is unavoidable here
@@ -87,13 +103,21 @@ internal static class PanelRegistry
             if (_fLcdBlock.GetValue(renderComponent) is not LcdMultiPanelComponent lcd) return;
             if (_fSurfaces.GetValue(renderComponent) is not Array surfaces || surfaces.Length == 0) return;
 
+            // Repaint before the early-out below: a panel whose surfaces are all registered is
+            // exactly the panel that may be carrying the cursor and needing a repaint.
+            CursorOverlay.DriveRepaint(renderComponent, surfaces);
+
+            // Cheap repeat path: every context already mapped means nothing to do. This is the
+            // per-frame case and it must stay a handful of dictionary probes.
+            bool anyNew = false;
+            foreach (var s in surfaces)
+                if (s != null && !CtxToPanel.ContainsKey(s)) { anyNew = true; break; }
+            if (!anyNew) return;
+
             var block = lcd.Entity?.TryGet<CubeBlockComponent>();
             if (block == null) return;
 
-            long entityId = EntityIdOf(lcd.Entity);
-            if (!SeenBlocks.TryAdd(entityId, 0)) return; // already registered; nothing to do
-
-            Register(panels, block, lcd, surfaces, entityId);
+            Register(panels, block, surfaces, EntityIdOf(lcd.Entity));
         }
         catch (Exception e)
         {
@@ -102,8 +126,7 @@ internal static class PanelRegistry
     }
 
     private static void Register(ConcurrentDictionary<PanelId, PanelInfo> panels,
-                                 CubeBlockComponent block, LcdMultiPanelComponent lcd,
-                                 Array surfaces, long entityId)
+                                 CubeBlockComponent block, Array surfaces, long entityId)
     {
         var def = block.Definition;
         Guid blockGuid = def?.Guid ?? Guid.Empty;
@@ -155,6 +178,7 @@ internal static class PanelRegistry
                 Width = w,
                 Height = h,
             };
+            CtxToPanel[ctx] = id;
             registered++;
         }
 
@@ -164,8 +188,6 @@ internal static class PanelRegistry
                         ? $", {uncatalogued} with no quad ({dummyNote ?? "no source"}) — needs calibration."
                         : "."));
     }
-
-    private static readonly ConcurrentDictionary<Guid, byte> WarnedGuids = new();
 
     /// <summary>
     /// The block's entity id, or a stable per-object substitute.

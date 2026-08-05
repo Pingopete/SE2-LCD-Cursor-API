@@ -14,6 +14,12 @@ public static class HostBridge
     /// <summary>Per-frame hook off the LCD render component's tick.</summary>
     public static volatile Action<object> LcdTickHook;
 
+    /// <summary>
+    /// Fired inside the LCD content render, with <c>(IDrawBatch batch, LcdPanelSurfaceContext ctx)</c>.
+    /// The only place anything can be drawn onto a panel.
+    /// </summary>
+    public static volatile Action<object, object> LcdRenderHook;
+
     /// <summary>Fired as each <c>LcdPanelSurfaceContext</c> is constructed — the cheapest place
     /// to learn a panel's surface definition without walking every grid.</summary>
     public static volatile Action<object> LcdSurfaceDefHook;
@@ -80,6 +86,18 @@ public sealed class CursorPlugin : IPlugin
             }
             else Log("WARNING: MeshEffectSystem.CreateHighlight not found — glow suppression unavailable.");
 
+            // The content render itself. This is the only seam that hands over an IDrawBatch
+            // bound to a panel's render target, so it is the only place a cursor can be drawn.
+            var contentRenderer = Type.GetType("Keen.Game2.Client.WorldObjects.CubeBlocks.Render.Lcd.LcdContentRendererSessionComponent, Game2.Client");
+            var render = contentRenderer?.GetMethod("Render", BindingFlags.Public | BindingFlags.Instance);
+            if (render != null)
+            {
+                harmony.Patch(render, postfix: new HarmonyLib.HarmonyMethod(
+                    typeof(CursorPlugin).GetMethod(nameof(LcdRenderPostfix), BindingFlags.Static | BindingFlags.NonPublic)));
+                Log("LCD content render patch applied (LcdContentRendererSessionComponent.Render).");
+            }
+            else Log("WARNING: LcdContentRendererSessionComponent.Render not found — no cursor can be drawn.");
+
             // Per-frame tick on the LCD render component: a cursor update that rides the
             // renderer stays in step with what is actually on screen.
             var renderComp = Type.GetType("Keen.Game2.Client.WorldObjects.CubeBlocks.Render.Lcd.LcdPanelSurfaceRenderComponent, Game2.Client");
@@ -113,6 +131,11 @@ public sealed class CursorPlugin : IPlugin
     private static void LcdTickPostfix(object __instance)
     {
         try { HostBridge.LcdTickHook?.Invoke(__instance); } catch { }
+    }
+
+    private static void LcdRenderPostfix(object __0, object __1)
+    {
+        try { HostBridge.LcdRenderHook?.Invoke(__0, __1); } catch { }
     }
 
     private static void SurfaceCtorPrefix(object __1)

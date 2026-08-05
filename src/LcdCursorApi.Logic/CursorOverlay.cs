@@ -1,0 +1,175 @@
+using System.Collections.Concurrent;
+using System.Reflection;
+using Keen.Game2.Client.WorldObjects.CubeBlocks.Render.Lcd;
+using Keen.VRage.Library.Mathematics;
+using Keen.VRage.Render.Contracts;
+using LcdCursorApi.Host;
+
+namespace LcdCursorApi.Logic;
+
+/// <summary>
+/// Draws the cursor onto whichever panel is being aimed at, and drives the repaint that lets
+/// it move.
+/// </summary>
+/// <remarks>
+/// <para><b>Two halves, and both are necessary.</b> Drawing happens in a postfix on
+/// <c>LcdContentRendererSessionComponent.Render</c>, the only seam handing over an
+/// <c>IDrawBatch</c> bound to a panel's target. But a panel only re-renders when the engine
+/// thinks its content changed, so on its own the cursor would be painted once and then sit
+/// frozen. The second half re-invokes the component's own private
+/// <c>RebuildSurfaceContent</c> for the aimed panel — the engine's real repaint path. Setting
+/// <c>ContentDirty</c> from inside the render postfix does not work: it is cleared immediately
+/// after Render returns.</para>
+///
+/// <para><b>Why a vector crosshair rather than a texture.</b> The GS2 prototype tries a texture
+/// first and keeps a vector fallback, having hit two problems: the texture streamer evicts by
+/// distance and priority, and an evicted texture draws nothing at all while still recording
+/// draws — a blank panel with healthy counters — which forces a re-pin every frame; and the
+/// cursor icon's file extension turned out not to be supported by <c>DrawImage</c> anyway. A
+/// crosshair built from filled rectangles has no asset to ship, nothing to pin and nothing to
+/// evict, which is what a first-light build wants.</para>
+///
+/// <para>Not yet verified in game.</para>
+/// </remarks>
+internal static class CursorOverlay
+{
+    /// <summary>Master switch. A consumer drawing its own cursor turns this off.</summary>
+    public static volatile bool Enabled = true;
+
+    /// <summary>Arm length of the crosshair, in panel pixels.</summary>
+    public static volatile float Size = 14f;
+
+    /// <summary>Half-thickness of each arm, in panel pixels.</summary>
+    public static volatile float Thickness = 2f;
+
+    private static CursorRuntime _runtime;
+
+    public static void Attach(CursorRuntime runtime)
+    {
+        _runtime = runtime;
+        HostBridge.LcdRenderHook = OnRender;
+    }
+
+    public static void Detach()
+    {
+        HostBridge.LcdRenderHook = null;
+        _runtime = null;
+        Tracked.Clear();
+    }
+
+    /// <summary>Contexts that carried a cursor recently, and when. Drives the repaint.</summary>
+    private static readonly ConcurrentDictionary<object, long> Tracked = new();
+
+    private static int _errors;
+    private static bool _firstDrawLogged;
+
+    // ------------------------------------------------------------------ draw
+
+    private static void OnRender(object batchObj, object ctxObj)
+    {
+        if (!Enabled) return;
+        if (batchObj is not IDrawBatch batch || ctxObj is not LcdPanelSurfaceContext ctx) return;
+
+        try
+        {
+            var rt = _runtime;
+            if (rt == null) return;
+
+            var hit = rt.Current;
+            if (!hit.IsValid) return;
+            if (!PanelRegistry.TryGetByContext(ctx, out var panelId) || panelId != hit.Panel) return;
+
+            // Keep repainting this context for a moment after the cursor leaves, so the last
+            // frame drawn is a clean one rather than a cursor stamped where it used to be.
+            Tracked[ctx] = Environment.TickCount64;
+
+            if (!_firstDrawLogged)
+            {
+                _firstDrawLogged = true;
+                Log.Line($"Cursor drawing on panel {panelId} at ({hit.X:F0},{hit.Y:F0}).");
+            }
+
+            DrawCrosshair(batch, hit.X, hit.Y);
+        }
+        catch (Exception e)
+        {
+            if (_errors++ < 3) Log.Error("cursor overlay", e);
+        }
+    }
+
+    private static void DrawCrosshair(IDrawBatch batch, float x, float y)
+    {
+        float s = Size, t = Thickness;
+
+        // Dark arms one pixel proud of the light ones. An LCD's content is arbitrary — a
+        // single-colour cursor disappears against a panel of the same colour, and the panel's
+        // contents are the consumer's business, not something to be worked around per mod.
+        var shadow = new ColorSRGB((byte)0, (byte)0, (byte)0, (byte)200);
+        FillRect(batch, x - s - 1, y - t - 1, x + s + 1, y + t + 1, shadow);
+        FillRect(batch, x - t - 1, y - s - 1, x + t + 1, y + s + 1, shadow);
+
+        var white = new ColorSRGB((byte)235, (byte)235, (byte)235, (byte)255);
+        FillRect(batch, x - s, y - t, x + s, y + t, white);
+        FillRect(batch, x - t, y - s, x + t, y + s, white);
+    }
+
+    private static void FillRect(IDrawBatch batch, float x0, float y0, float x1, float y1, ColorSRGB color)
+    {
+        Span<QuadraticBezier2> rect = stackalloc QuadraticBezier2[4];
+        rect[0] = new QuadraticBezier2(new Vector2(x0, y0), new Vector2(x1, y0));
+        rect[1] = new QuadraticBezier2(new Vector2(x1, y0), new Vector2(x1, y1));
+        rect[2] = new QuadraticBezier2(new Vector2(x1, y1), new Vector2(x0, y1));
+        rect[3] = new QuadraticBezier2(new Vector2(x0, y1), new Vector2(x0, y0));
+        batch.DrawFill(rect, color, null, false);
+    }
+
+    // --------------------------------------------------------------- repaint
+
+    private static MethodInfo _rebuild;
+    private static bool _rebuildResolved;
+
+    /// <summary>How long a context keeps repainting after the cursor last touched it, in ms.</summary>
+    private const long TrackTimeoutMs = 500;
+
+    /// <summary>
+    /// From the render tick: force a repaint of this component's surfaces while any of them
+    /// is carrying the cursor.
+    /// </summary>
+    public static void DriveRepaint(object renderComponent, Array surfaces)
+    {
+        if (!Enabled || renderComponent == null || surfaces == null) return;
+
+        try
+        {
+            if (!_rebuildResolved)
+            {
+                _rebuildResolved = true;
+                _rebuild = renderComponent.GetType().GetMethod("RebuildSurfaceContent",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                Log.Line($"Repaint driver: RebuildSurfaceContent {(_rebuild != null ? "resolved" : "NOT FOUND — cursor will not move")}.");
+            }
+            if (_rebuild == null) return;
+
+            long now = Environment.TickCount64;
+
+            bool anyActive = false;
+            foreach (var s in surfaces)
+            {
+                if (s == null) continue;
+                if (!Tracked.TryGetValue(s, out var touched)) continue;
+                if (now - touched > TrackTimeoutMs) { Tracked.TryRemove(s, out _); continue; }
+                anyActive = true;
+            }
+            if (!anyActive) return;
+
+            // Rebuild every surface of the component, not only the tracked one: contexts get
+            // re-created, and a stale reference would otherwise stop repainting silently.
+            foreach (var s in surfaces)
+                if (s != null) _rebuild.Invoke(renderComponent, new[] { s });
+        }
+        catch (Exception e)
+        {
+            if (_errors++ < 3) Log.Error("repaint driver", e);
+        }
+    }
+}

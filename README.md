@@ -76,6 +76,43 @@ _glow = LcdCursor.SuppressInteractionHighlight();
 Subscriptions survive a hot reload of the plugin's logic — the subscriber list is owned by
 the facade, not by the reloadable half. See the remarks on `LcdCursor` for why.
 
+## Running it
+
+```bash
+scripts/build.bat
+```
+
+Then launch with the plugin. **Load it from the deploy directory, not from `bin\Release`** —
+the bootstrap looks for its logic dll beside itself, so loading from `bin` would make it
+hot-reload the wrong copy and ignore every deploy:
+
+```bash
+scripts/launch-se2.bat
+```
+
+Watch `D:\SE2LcdCursor\lcdcursor.log`. In order, it should report the patches applying, the
+runtime publishing, `RebuildSurfaceContent` resolving, panels registering as they come into
+view, and then a one-off line the first time the cursor draws.
+
+Aim at any LCD. A white crosshair with a dark outline should track your view across the
+screen. It needs no tagging and no setup on the panel — every LCD the renderer is drawing is
+registered automatically.
+
+The logic dll hot-reloads within ~2s of a build. The bootstrap and the contract assembly do
+not — changing either needs a game restart.
+
+### What to look at first
+
+The three assumptions everything rests on, all confirmable in one session:
+
+1. **The dummy quad is the screen.** Does the crosshair reach all four edges of the glass, and
+   only the glass? If it stops short or runs past, the dummy box is not the visible screen and
+   the inset needs measuring. The wide LCD is the one to check — its numbers already disagree.
+2. **The block frame is right.** Does a *rotated* panel work as well as an unrotated one? Any
+   `child transform disagrees with BlockOrientation` line in the log means it does not.
+3. **The repaint drives.** Does the cursor move smoothly, or stick and jump? Sticking means
+   `RebuildSurfaceContent` is not doing what the prototype's is.
+
 ## Building
 
 Paths come from `Directory.Build.props` and can be overridden without editing it:

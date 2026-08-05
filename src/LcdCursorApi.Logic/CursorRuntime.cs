@@ -28,12 +28,14 @@ internal sealed class CursorRuntime : ILcdCursorRuntime
     {
         CatalogStore.EnsureLoaded();
         PanelRegistry.Attach(_panels);
+        CursorOverlay.Attach(this);
         HostBridge.LcdTickHook = OnRenderTick;
     }
 
     public void Stop()
     {
         HostBridge.LcdTickHook = null;
+        CursorOverlay.Detach();
         PanelRegistry.Detach();
         _modes.ForceRelease();
     }
