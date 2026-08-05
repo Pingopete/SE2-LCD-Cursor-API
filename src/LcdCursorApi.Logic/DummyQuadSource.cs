@@ -54,32 +54,42 @@ internal static class DummyQuadSource
         {
             if (!TryFindLcdDummy(block, out var dummy, out diagnostic)) return null;
 
-            // The dummy is a unit box under GetMatrix(). Its local axes, scaled, are the box's
-            // half-extents; the screen is the face at +Z.
+            // The dummy is a unit box under GetMatrix(): rows 1-3 are the scaled local axes,
+            // row 4 the centre. The box spans -0.5..+0.5 before scale, so those axes are full
+            // extents and a face sits half a depth out along the local Z.
             var m = dummy.GetMatrix();
             var right = new Vector3(m.M11, m.M12, m.M13);
             var up = new Vector3(m.M21, m.M22, m.M23);
             var fwd = new Vector3(m.M31, m.M32, m.M33);
             var centre = new Vector3(m.M41, m.M42, m.M43);
 
-            // Unit box spans -0.5..+0.5 before scale, so the axes above are full extents and
-            // the face sits half a depth out from the centre.
-            var faceCentre = centre + fwd * 0.5f;
-            var origin = faceCentre - right * 0.5f - up * 0.5f;
+            // WHICH face is the screen is not derivable from the assemblies — it is a fact
+            // about how the block was authored. The engine's forward is -Z, so that is the
+            // default, but it is a knob because the cost of being wrong is total (every ray
+            // is discarded as a backface and nothing draws at all) and the cost of trying the
+            // other value is a two-second config reload.
+            float sign = Config.FaceSign;
+            var normal = Normalize(fwd) * sign;
 
-            var n = Normalize(fwd);
+            var faceCentre = centre + fwd * (0.5f * sign) + normal * Config.PlaneOffset;
 
-            // V runs down the screen: surface coordinates are top-left origin, the dummy's up
-            // axis is not.
-            var edgeV = -up;
-            var quadOrigin = origin + up;
+            // Surface coordinates are top-left origin; the dummy's up axis is not. Facing the
+            // screen from outside, the horizontal axis reverses with the face.
+            var axisU = right * sign;
+            var axisV = -up;
+            if (Config.SwapUv) (axisU, axisV) = (axisV, axisU);
+            if (Config.FlipU) axisU = -axisU;
+            if (Config.FlipV) axisV = -axisV;
+
+            // Origin is the corner that maps to (0,0): step back half of each axis from centre.
+            var quadOrigin = faceCentre - axisU * 0.5f - axisV * 0.5f;
 
             return new ScreenQuad
             {
                 Origin = new[] { quadOrigin.X, quadOrigin.Y, quadOrigin.Z },
-                EdgeU = new[] { right.X, right.Y, right.Z },
-                EdgeV = new[] { edgeV.X, edgeV.Y, edgeV.Z },
-                Normal = new[] { n.X, n.Y, n.Z },
+                EdgeU = new[] { axisU.X, axisU.Y, axisU.Z },
+                EdgeV = new[] { axisV.X, axisV.Y, axisV.Z },
+                Normal = new[] { normal.X, normal.Y, normal.Z },
                 PlanarResidual = 0f, // a dummy is a box by construction; nothing is being fitted
             };
         }

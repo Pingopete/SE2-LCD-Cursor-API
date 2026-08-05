@@ -28,7 +28,10 @@ public static class LogicEntry
         }
         catch (Exception e)
         {
-            if (_errors++ < 5) Log.Error("logic tick", e);
+            // Log defensively: if the logger itself is the thing that is broken — which is
+            // exactly the case when the logic fails to bind against an older bootstrap —
+            // then throwing out of the catch block turns one fault into a silent one.
+            try { if (_errors++ < 5) Log.Error("logic tick", e); } catch { }
         }
     }
 

@@ -34,13 +34,34 @@ internal static class ScreenQuadSolver
     /// </param>
     /// <returns>False when the ray is parallel to the screen, hits it from behind, hits beyond
     /// <see cref="MaxAimDistance"/>, or lands outside the quad plus <paramref name="margin"/>.</returns>
+    /// <summary>Why a projection failed. A silent false is useless when nothing is drawing.</summary>
+    internal enum Reject
+    {
+        None = 0,
+        NoQuad,
+        /// <summary>Ray hits the back of the screen, or runs parallel to it.</summary>
+        BackFace,
+        /// <summary>Behind the viewer, or past <see cref="MaxAimDistance"/>.</summary>
+        Range,
+        /// <summary>On the screen's plane but off the screen.</summary>
+        OffQuad,
+        Degenerate,
+    }
+
     public static bool TryProject(
         in Vector3D origin, in Vector3D direction, ScreenQuad quad,
         out float u, out float v, out double distance, float margin = 0.02f)
+        => TryProject(origin, direction, quad, out u, out v, out distance, out _, margin);
+
+    /// <inheritdoc cref="TryProject(in Vector3D, in Vector3D, ScreenQuad, out float, out float, out double, float)"/>
+    public static bool TryProject(
+        in Vector3D origin, in Vector3D direction, ScreenQuad quad,
+        out float u, out float v, out double distance, out Reject reject, float margin = 0.02f)
     {
         u = v = 0f;
         distance = 0.0;
-        if (quad == null) return false;
+        reject = Reject.None;
+        if (quad == null) { reject = Reject.NoQuad; return false; }
 
         var o = new Vector3D(quad.Origin[0], quad.Origin[1], quad.Origin[2]);
         var eu = new Vector3D(quad.EdgeU[0], quad.EdgeU[1], quad.EdgeU[2]);
@@ -50,10 +71,10 @@ internal static class ScreenQuadSolver
         double denom = Dot(n, direction);
         // Facing away, or edge-on. Edge-on is not merely degenerate arithmetic — a ray in the
         // screen plane has no single intersection, so there is no answer to return.
-        if (denom >= -1e-9) return false;
+        if (denom >= -1e-9) { reject = Reject.BackFace; return false; }
 
         double t = Dot(n, Sub(o, origin)) / denom;
-        if (t <= 1e-4 || t > MaxAimDistance) return false;
+        if (t <= 1e-4 || t > MaxAimDistance) { reject = Reject.Range; return false; }
 
         var hit = new Vector3D(
             origin.X + direction.X * t,
@@ -62,11 +83,15 @@ internal static class ScreenQuadSolver
         var d = Sub(hit, o);
 
         double uuLen2 = Dot(eu, eu), vvLen2 = Dot(ev, ev);
-        if (uuLen2 <= 1e-12 || vvLen2 <= 1e-12) return false; // degenerate bake
+        if (uuLen2 <= 1e-12 || vvLen2 <= 1e-12) { reject = Reject.Degenerate; return false; }
 
         double du = Dot(d, eu) / uuLen2;
         double dv = Dot(d, ev) / vvLen2;
-        if (du < -margin || du > 1 + margin || dv < -margin || dv > 1 + margin) return false;
+        if (du < -margin || du > 1 + margin || dv < -margin || dv > 1 + margin)
+        {
+            reject = Reject.OffQuad;
+            return false;
+        }
 
         u = (float)Math.Clamp(du, 0.0, 1.0);
         v = (float)Math.Clamp(dv, 0.0, 1.0);

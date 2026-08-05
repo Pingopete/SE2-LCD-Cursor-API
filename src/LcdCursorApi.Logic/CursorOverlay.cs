@@ -33,8 +33,8 @@ namespace LcdCursorApi.Logic;
 /// </remarks>
 internal static class CursorOverlay
 {
-    /// <summary>Master switch. A consumer drawing its own cursor turns this off.</summary>
-    public static volatile bool Enabled = true;
+    /// <summary>Master switch. A consumer drawing its own cursor turns this off via the config.</summary>
+    public static bool Enabled => Config.ShowCursor;
 
     /// <summary>Arm length of the crosshair, in panel pixels.</summary>
     public static volatile float Size = 14f;

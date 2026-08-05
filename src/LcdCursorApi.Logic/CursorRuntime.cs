@@ -44,7 +44,24 @@ internal sealed class CursorRuntime : ILcdCursorRuntime
     /// Housekeeping, from the bootstrap's 2-second worker. Deliberately not where the cursor
     /// is resolved — a cursor updated twice a second is not a cursor.
     /// </summary>
-    public void Tick() => EngineLocator.Poll();
+    public void Tick()
+    {
+        EngineLocator.Poll();
+        Config.Poll();
+
+        // Standalone convenience: with no consumer holding a claim the glow would never be
+        // suppressed, so the config knob drives the count directly. Written as a set-to-target
+        // rather than an increment so repeated ticks cannot ratchet it upwards.
+        int want = Config.SuppressHighlight ? 1 : 0;
+        if (_ownHighlightClaim != want)
+        {
+            Interlocked.Add(ref HostBridge.HighlightSuppressions, want - _ownHighlightClaim);
+            _ownHighlightClaim = want;
+            Log.Line($"Standalone highlight suppression {(want != 0 ? "on" : "off")}.");
+        }
+    }
+
+    private int _ownHighlightClaim;
 
     /// <summary>
     /// The per-frame path, off the LCD render tick.

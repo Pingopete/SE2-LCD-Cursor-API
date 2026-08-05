@@ -55,6 +55,19 @@ internal static class PanelRegistry
     /// <summary>Blocks whose one-off diagnostics have already run.</summary>
     private static readonly ConcurrentDictionary<Guid, byte> WarnedGuids = new();
 
+    /// <summary>Block types whose quad has been logged, so it appears once and not per placement.</summary>
+    private static readonly ConcurrentDictionary<Guid, byte> QuadLogged = new();
+
+    private static double Len(float[] v) => Math.Sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+
+    /// <summary>Definition debug names are full content paths; the leaf is what identifies them.</summary>
+    private static string ShortName(string debugName)
+    {
+        if (string.IsNullOrEmpty(debugName)) return "?";
+        int slash = debugName.LastIndexOfAny(new[] { '\\', '/' });
+        return slash >= 0 ? debugName[(slash + 1)..] : debugName;
+    }
+
     public static ICollection<PanelEntry> Live => Entries.Values;
 
     public static bool TryGet(PanelId id, out PanelEntry entry) => Entries.TryGetValue(id, out entry);
@@ -76,6 +89,7 @@ internal static class PanelRegistry
     private static FieldInfo _fLcdBlock, _fSurfaces;
     private static bool _fieldsResolved;
     private static int _fieldWarnings;
+    private static int _builtGeneration;
 
     /// <summary>
     /// Called from the render tick with an <c>LcdPanelSurfaceRenderComponent</c>. Registers the
@@ -106,6 +120,20 @@ internal static class PanelRegistry
             // Repaint before the early-out below: a panel whose surfaces are all registered is
             // exactly the panel that may be carrying the cursor and needing a repaint.
             CursorOverlay.DriveRepaint(renderComponent, surfaces);
+
+            // Quads are built at registration, so a config change that reshapes them does
+            // nothing until the panels are rebuilt against it. Dropping the maps forces that
+            // on the next pass.
+            int gen = Config.Generation;
+            if (gen != _builtGeneration)
+            {
+                _builtGeneration = gen;
+                Entries.Clear();
+                CtxToPanel.Clear();
+                WarnedGuids.Clear();
+                QuadLogged.Clear();
+                Log.Line($"Config generation {gen}: panels dropped, rebuilding quads.");
+            }
 
             // Cheap repeat path: every context already mapped means nothing to do. This is the
             // per-frame case and it must stay a handful of dictionary probes.
@@ -149,6 +177,7 @@ internal static class PanelRegistry
         // The dummy is per block, not per surface: built at most once here.
         ScreenQuad dummyQuad = null;
         string dummyNote = null;
+        bool loggedQuad = QuadLogged.TryAdd(blockGuid, 0);
         foreach (var s in surfaces)
         {
             if (s is not LcdPanelSurfaceContext ctx) continue;
@@ -182,8 +211,16 @@ internal static class PanelRegistry
             registered++;
         }
 
+        // The quad, once per block type. Without this the geometry is invisible and every
+        // theory about it stays a guess.
+        if (dummyQuad != null && loggedQuad)
+            Log.Line($"  quad '{ShortName(debugName)}': origin ({dummyQuad.Origin[0]:F3},{dummyQuad.Origin[1]:F3},{dummyQuad.Origin[2]:F3}) " +
+                     $"U ({dummyQuad.EdgeU[0]:F3},{dummyQuad.EdgeU[1]:F3},{dummyQuad.EdgeU[2]:F3}) |U|={Len(dummyQuad.EdgeU):F3}m " +
+                     $"V ({dummyQuad.EdgeV[0]:F3},{dummyQuad.EdgeV[1]:F3},{dummyQuad.EdgeV[2]:F3}) |V|={Len(dummyQuad.EdgeV):F3}m " +
+                     $"N ({dummyQuad.Normal[0]:F2},{dummyQuad.Normal[1]:F2},{dummyQuad.Normal[2]:F2})");
+
         if (registered > 0)
-            Log.Line($"Registered '{debugName}' ({entityId}): {registered} surface(s)"
+            Log.Line($"Registered '{ShortName(debugName)}' ({entityId}): {registered} surface(s)"
                    + (uncatalogued > 0
                         ? $", {uncatalogued} with no quad ({dummyNote ?? "no source"}) — needs calibration."
                         : "."));

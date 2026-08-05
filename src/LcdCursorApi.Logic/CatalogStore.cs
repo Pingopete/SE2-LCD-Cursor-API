@@ -24,8 +24,7 @@ internal static class CatalogStore
 
         try
         {
-            var dir = Path.GetDirectoryName(typeof(CatalogStore).Assembly.Location) ?? ".";
-            var path = Path.Combine(dir, FileName);
+            var path = Paths.In(FileName);
             if (!File.Exists(path))
             {
                 Log.Line($"No catalog at {path} — every panel will need calibration until one is baked.");

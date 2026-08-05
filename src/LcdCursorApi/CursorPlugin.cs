@@ -27,6 +27,12 @@ public static class HostBridge
     /// <summary>Non-zero suppresses the interaction glow. A count, not a flag: several consumers
     /// may hold a claim and the glow must return only when the last one releases.</summary>
     public static int HighlightSuppressions;
+
+    // NOTE: do not add fields here to pass data to the logic. The bootstrap loads once at game
+    // start and never hot-reloads, so freshly-built logic referencing a newly-added field
+    // throws MissingFieldException against the bootstrap actually in memory, and every reload
+    // fails until the game is restarted. The logic derives what it needs from members that
+    // have always existed — see Logic/Paths.cs.
 }
 
 public sealed class CursorPlugin : IPlugin
@@ -243,9 +249,30 @@ public sealed class CursorPlugin : IPlugin
     }
 
     private static readonly object LogGate = new();
+
+    /// <summary>
+    /// Append a line, but never let logging stall the caller.
+    /// </summary>
+    /// <remarks>
+    /// This used to be an unconditional <c>lock</c> around the file write, and that wedged the
+    /// whole plugin once: a write that blocks while holding the gate blocks the reload worker
+    /// behind it, and the worker is the only thing that could have loaded the fix. The symptom
+    /// was total silence — no reloads, no ticks, no errors — which reads exactly like a dead
+    /// thread and took a while to tell apart from one.
+    ///
+    /// A dropped log line is a much smaller problem than a reload loop that cannot recover, so
+    /// the gate is only ever taken with a timeout.
+    /// </remarks>
     private void Log(string msg)
     {
-        try { lock (LogGate) File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss.fff}] [boot] {msg}{Environment.NewLine}"); }
+        bool taken = false;
+        try
+        {
+            Monitor.TryEnter(LogGate, 250, ref taken);
+            if (!taken) return; // contended: drop the line rather than block the worker
+            File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss.fff}] [boot] {msg}{Environment.NewLine}");
+        }
         catch { }
+        finally { if (taken) Monitor.Exit(LogGate); }
     }
 }

@@ -37,16 +37,25 @@ internal static class AimResolver
         float bestU = 0f, bestV = 0f;
         double bestT = double.MaxValue;
 
+        int tested = 0, noQuad = 0, noFrame = 0;
+        Span<int> rejects = stackalloc int[8];
+
         foreach (var entry in PanelRegistry.Live)
         {
-            if (entry.Quad == null) continue; // uncatalogued and uncalibrated: nothing to project onto
-            if (!BlockFrame.TryToModelSpace(entry.Block, eye, forward, out var mo, out var md)) continue;
-            if (!ScreenQuadSolver.TryProject(mo, md, entry.Quad, out var u, out var v, out var t)) continue;
+            tested++;
+            if (entry.Quad == null) { noQuad++; continue; } // nothing to project onto
+            if (!BlockFrame.TryToModelSpace(entry.Block, eye, forward, out var mo, out var md)) { noFrame++; continue; }
+            if (!ScreenQuadSolver.TryProject(mo, md, entry.Quad, out var u, out var v, out var t, out var why))
+            {
+                rejects[(int)why]++;
+                continue;
+            }
             if (t >= bestT) continue;
             bestT = t; bestU = u; bestV = v; bestEntry = entry;
         }
 
         bool aiming = bestEntry != null;
+        if (!aiming) ReportNothingFound(tested, noQuad, noFrame, rejects);
         var aimedPanel = aiming ? bestEntry.Id : default;
 
         EngineLocator.MouseDelta(out float mdx, out float mdy);
@@ -76,6 +85,33 @@ internal static class AimResolver
         if (!aiming) return default;
         return new CursorHit(bestEntry.Id, bestU, bestV, bestU * bestEntry.Width, bestV * bestEntry.Height,
                              bestT, CursorMode.HeadAim, buttons);
+    }
+
+    private static long _lastDiag;
+
+    /// <summary>
+    /// Say why nothing was hit. Rate-limited, and only while the answer is still "nothing" —
+    /// a resolve that finds no panel is otherwise completely silent, which is indistinguishable
+    /// from the resolve not running at all.
+    /// </summary>
+    /// <remarks>
+    /// The breakdown is the diagnosis. All-<c>BackFace</c> means the quad's normal points the
+    /// wrong way — invert <c>faceSign</c> in the config. All-<c>OffQuad</c> means the plane is
+    /// right but the rectangle is misplaced or mis-sized. All-<c>Range</c> means the plane is
+    /// behind the viewer, which is the same normal problem seen from the other side.
+    /// </remarks>
+    private static void ReportNothingFound(int tested, int noQuad, int noFrame, ReadOnlySpan<int> rejects)
+    {
+        if (!Config.DiagnoseAim) return;
+        long now = Environment.TickCount64;
+        if (now - _lastDiag < 2000) return;
+        _lastDiag = now;
+
+        Log.Line($"No panel under the aim ray: {tested} tested, {noQuad} without a quad, {noFrame} without a block frame, " +
+                 $"backface {rejects[(int)ScreenQuadSolver.Reject.BackFace]}, " +
+                 $"range {rejects[(int)ScreenQuadSolver.Reject.Range]}, " +
+                 $"off-quad {rejects[(int)ScreenQuadSolver.Reject.OffQuad]}, " +
+                 $"degenerate {rejects[(int)ScreenQuadSolver.Reject.Degenerate]}.");
     }
 
     /// <summary>The player's view ray in world space.</summary>

@@ -18,8 +18,7 @@ internal static class Log
 
     static Log()
     {
-        var dir = System.IO.Path.GetDirectoryName(typeof(Log).Assembly.Location) ?? ".";
-        Path = System.IO.Path.Combine(dir, "lcdcursor.log");
+        Path = Paths.In("lcdcursor.log");
         Writer = new Thread(Drain) { IsBackground = true, Name = "LcdCursorLog" };
         Writer.Start();
     }
