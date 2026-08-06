@@ -37,6 +37,10 @@ internal static class AimResolver
         float bestU = 0f, bestV = 0f;
         double bestT = double.MaxValue;
 
+        // Calibration runs BEFORE the quad search and independently of it: the whole point is
+        // that the target panel has no quad yet, so nothing would be found to aim at.
+        if (Calibration.Active) { ServiceCalibration(eye, forward); return default; }
+
         int tested = 0, noQuad = 0, noFrame = 0;
         Span<int> rejects = stackalloc int[8];
 
@@ -56,6 +60,8 @@ internal static class AimResolver
 
         bool aiming = bestEntry != null;
         if (!aiming) ReportNothingFound(tested, noQuad, noFrame, rejects);
+
+        CheckCalibrationTrigger(eye, forward);
         var aimedPanel = aiming ? bestEntry.Id : default;
 
         // Delta comes from the camera's own input path (see MouseDelta below), not from the
@@ -106,6 +112,89 @@ internal static class AimResolver
 
     private static long _lastDiag;
     private static CursorMode _lastMode = CursorMode.HeadAim;
+    private static bool _calibClickWasDown;
+
+    private const int VK_SHIFT = 0x10, VK_MENU = 0x12; // Shift, Alt
+    private static bool _triggerWasDown;
+
+    /// <summary>
+    /// Shift+Alt+LeftClick starts calibrating the nearest surface that has no quad.
+    /// </summary>
+    /// <remarks>
+    /// <para>Selection cannot work the way it does for a calibrated panel. A cockpit screen has
+    /// no quad — that is the entire reason it needs calibrating — so there is nothing to aim
+    /// at and no hit to report. Instead the surface is picked by how close the block sits to
+    /// the view ray, which is coarse but only has to choose a surface, not locate one.</para>
+    ///
+    /// <para>Surfaces are taken in index order, so repeating the gesture walks a cockpit's four
+    /// screens one at a time, and the prompt names each. Shift+Alt avoids Ctrl, which now
+    /// belongs to decoupled cursor mode.</para>
+    /// </remarks>
+    private static void CheckCalibrationTrigger(in Vector3D eye, in Vector3 forward)
+    {
+        bool combo = Down(VK_SHIFT) && Down(VK_MENU) && Down(VK_LBUTTON);
+        bool rising = combo && !_triggerWasDown;
+        _triggerWasDown = combo;
+        if (!rising || Calibration.Active) return;
+
+        PanelRegistry.PanelEntry best = null;
+        double bestScore = double.MaxValue;
+
+        foreach (var entry in PanelRegistry.Live)
+        {
+            if (entry.Quad != null) continue; // already has geometry
+            if (!BlockFrame.TryToModelSpace(entry.Block, eye, forward, out var mo, out var md)) continue;
+
+            // Perpendicular distance from the block's model origin to the view ray, plus a
+            // little for distance along it. Good enough to pick which block is being looked at.
+            double t = -(mo.X * md.X + mo.Y * md.Y + mo.Z * md.Z) / Math.Max(1e-9, md.X * md.X + md.Y * md.Y + md.Z * md.Z);
+            if (t <= 0 || t > 12.0) continue; // behind, or too far to be the intended one
+            double px = mo.X + md.X * t, py = mo.Y + md.Y * t, pz = mo.Z + md.Z * t;
+            double perp = Math.Sqrt(px * px + py * py + pz * pz);
+            double score = perp + t * 0.05;
+            if (score < bestScore) { bestScore = score; best = entry; }
+        }
+
+        if (best == null)
+        {
+            Log.Line("Calibration: no uncalibrated LCD surface near your view. Look at the block and try again.");
+            return;
+        }
+
+        Calibration.Begin(best.Id, force: false);
+    }
+
+    /// <summary>
+    /// Feed clicks to <see cref="Calibration"/> while it is running.
+    /// </summary>
+    /// <remarks>
+    /// Rays are handed over in the target block's MODEL space, so the solved quad lands in the
+    /// same frame a dummy-derived one would and needs no conversion afterwards. Right-click
+    /// cancels — a calibration the player cannot escape is worse than one they have to redo.
+    /// </remarks>
+    private static void ServiceCalibration(in Vector3D eye, in Vector3 forward)
+    {
+        if (!PanelRegistry.TryGet(Calibration.Target, out var entry))
+        {
+            Calibration.Cancel("the panel is no longer registered");
+            return;
+        }
+
+        var buttons = ReadButtons(out _);
+        if ((buttons & CursorButtons.Right) != 0) { Calibration.Cancel("right-click"); _calibClickWasDown = true; return; }
+
+        bool down = (buttons & CursorButtons.Left) != 0;
+        bool rising = down && !_calibClickWasDown;
+        _calibClickWasDown = down;
+        if (!rising) return;
+
+        if (!BlockFrame.TryToModelSpace(entry.Block, eye, forward, out var mo, out var md))
+        {
+            Log.Line("Calibration: could not transform the click into the block's frame — sample ignored.");
+            return;
+        }
+        Calibration.Sample(mo, md);
+    }
 
     /// <summary>
     /// Say why nothing was hit. Rate-limited, and only while the answer is still "nothing" —

@@ -35,6 +35,24 @@ internal static class PanelRegistry
         public CubeBlockComponent Block;
         public ScreenQuad Quad;
         public int Width, Height;
+        public Guid BlockGuid;
+        public string BlockName;
+    }
+
+    /// <summary>
+    /// Drop the built quads so they are rebuilt against a freshly stored catalog entry.
+    /// </summary>
+    /// <remarks>
+    /// Called after a calibration. Without it the newly measured quad would sit in the catalog
+    /// doing nothing until the panels happened to re-register — the same class of bug as a
+    /// config knob that only affects future registrations.
+    /// </remarks>
+    public static void InvalidateQuads()
+    {
+        Entries.Clear();
+        CtxToPanel.Clear();
+        QuadLogged.Clear();
+        Log.Line("Panels dropped: rebuilding quads against the updated catalog.");
     }
 
     private static readonly ConcurrentDictionary<PanelId, PanelEntry> Entries = new();
@@ -210,6 +228,8 @@ internal static class PanelRegistry
                 Quad = quad,
                 Width = w,
                 Height = h,
+                BlockGuid = blockGuid,
+                BlockName = ShortName(debugName),
             };
             CtxToPanel[ctx] = id;
             registered++;

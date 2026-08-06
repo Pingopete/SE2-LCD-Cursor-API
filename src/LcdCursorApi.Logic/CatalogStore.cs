@@ -53,6 +53,47 @@ internal static class CatalogStore
         catch (Exception e) { Log.Error("catalog load", e); }
     }
 
+    /// <summary>
+    /// Record a measured quad and write the catalog back to disk.
+    /// </summary>
+    /// <remarks>
+    /// Saved immediately rather than on shutdown. A calibration is several minutes of careful
+    /// clicking, and losing it to a crash — in a game with this one's crash history — would be
+    /// the kind of loss that stops people using the feature at all.
+    /// </remarks>
+    public static void Store(Guid blockGuid, string debugName, int surfaceIndex, ScreenQuad quad)
+    {
+        try
+        {
+            if (!ByGuid.TryGetValue(blockGuid, out var block))
+            {
+                block = new CatalogBlock { BlockGuid = blockGuid.ToString(), DebugName = debugName };
+                ByGuid[blockGuid] = block;
+            }
+
+            block.Surfaces.RemoveAll(s => s.SurfaceIndex == surfaceIndex);
+            block.Surfaces.Add(new CatalogSurface { SurfaceIndex = surfaceIndex, Quad = quad });
+            block.Surfaces.Sort((a, b) => a.SurfaceIndex.CompareTo(b.SurfaceIndex));
+
+            Save();
+            Log.Line($"Catalog: stored surface {surfaceIndex} for '{debugName}' ({ByGuid.Count} block(s) now catalogued).");
+        }
+        catch (Exception e) { Log.Error("catalog store", e); }
+    }
+
+    private static void Save()
+    {
+        var path = Paths.In(FileName);
+        var catalog = new LcdCatalog { GameBuild = "measured in-game", Blocks = ByGuid.Values.ToList() };
+
+        // Written beside the target then moved into place: a half-written catalog would be
+        // silently ignored at next load as a parse failure, quietly discarding every
+        // calibration in it.
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, catalog.ToJson());
+        File.Move(tmp, path, overwrite: true);
+    }
+
     public static bool TryGet(Guid blockGuid, int surfaceIndex, out CatalogSurface surface)
     {
         surface = null;
