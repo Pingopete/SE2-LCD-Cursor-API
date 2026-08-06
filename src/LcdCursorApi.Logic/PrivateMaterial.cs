@@ -193,13 +193,53 @@ internal static class PrivateMaterial
         catch { return false; }
     }
 
-    private static MethodInfo _cloneMi;
+    private static MethodInfo _cloneMi, _cloneCtxMi;
+    private static bool _cloneResolved;
 
+    /// <summary>
+    /// Produce a genuinely distinct copy of a material definition.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The parameterless <c>DeepClone()</c> hands back the same instance</b> for these
+    /// definitions — measured in the RTT work as "clone of LCDMaterialDefinition #00b928be ->
+    /// #00b928be", and since neither <c>PBRMaterialDefinition</c> nor <c>LCDMaterialDefinition</c>
+    /// overrides <c>GetHashCode</c>, an identical hash is identical *identity*, not a value
+    /// coincidence. Definitions are interned, so cloning one returns the registered object.</para>
+    ///
+    /// <para>That is fatal here rather than merely useless: the shared-material key holds the
+    /// definition <b>by reference</b>, so the same object means the same key, means the same
+    /// borrowed material. The clone would have achieved nothing while reporting success.</para>
+    ///
+    /// <para>So the <c>CloningContext</c> overload is tried first with a fresh context — that is
+    /// the one that can build a genuinely new graph — and the parameterless form is only a
+    /// fallback. The caller still verifies with <c>ReferenceEquals</c>; this is a better first
+    /// guess, not a guarantee.</para>
+    /// </remarks>
     private static object Clone(object materialDefinition)
     {
-        _cloneMi ??= materialDefinition.GetType()
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .FirstOrDefault(m => m.Name == "DeepClone" && m.GetParameters().Length == 0);
+        var type = materialDefinition.GetType();
+        if (!_cloneResolved)
+        {
+            _cloneResolved = true;
+            var all = type.GetMethods(Any).Where(m => m.Name == "DeepClone").ToList();
+            _cloneCtxMi = all.FirstOrDefault(m => m.GetParameters().Length == 1);
+            _cloneMi = all.FirstOrDefault(m => m.GetParameters().Length == 0);
+            Log.Line($"PRIVATE MATERIAL: clone methods on {type.Name} — " +
+                     $"withContext={(_cloneCtxMi != null ? "yes" : "no")}, parameterless={(_cloneMi != null ? "yes" : "no")}.");
+        }
+
+        if (_cloneCtxMi != null)
+        {
+            try
+            {
+                var pt = _cloneCtxMi.GetParameters()[0].ParameterType;
+                var bare = pt.IsByRef ? pt.GetElementType() : pt;
+                var result = _cloneCtxMi.Invoke(materialDefinition, new[] { Activator.CreateInstance(bare) });
+                if (result != null && !ReferenceEquals(result, materialDefinition)) return result;
+            }
+            catch { /* fall through to the parameterless form */ }
+        }
+
         return _cloneMi?.Invoke(materialDefinition, null);
     }
 

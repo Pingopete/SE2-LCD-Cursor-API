@@ -28,11 +28,23 @@ public static class HostBridge
     /// may hold a claim and the glow must return only when the last one releases.</summary>
     public static int HighlightSuppressions;
 
-    // NOTE: do not add fields here to pass data to the logic. The bootstrap loads once at game
-    // start and never hot-reloads, so freshly-built logic referencing a newly-added field
-    // throws MissingFieldException against the bootstrap actually in memory, and every reload
-    // fails until the game is restarted. The logic derives what it needs from members that
-    // have always existed — see Logic/Paths.cs.
+    /// <summary>
+    /// Called with the camera's mouse delta before the camera consumes it. Returning true
+    /// swallows the movement, so the view stays put and the cursor gets it instead.
+    /// </summary>
+    /// <remarks>
+    /// Reading the delta and suppressing the camera are the same problem, so they are one
+    /// hook. The engine's own relative pointer state can report movement, but nothing outside
+    /// the camera's input path can stop the camera acting on it.
+    /// </remarks>
+    public static volatile Func<float, float, bool> MouseDeltaHook;
+
+    // NOTE: adding fields here is a BREAKING change for hot reload. The bootstrap loads once
+    // at game start and never reloads, so logic referencing a newly-added field throws
+    // MissingFieldException against the bootstrap actually in memory, and every reload fails
+    // until the game restarts. If you must add one, the logic side has to reach it
+    // REFLECTIVELY so an older bootstrap degrades to a no-op instead of throwing — see
+    // Logic/HostHooks.cs. Anything derivable should be derived instead; see Logic/Paths.cs.
 }
 
 public sealed class CursorPlugin : IPlugin
@@ -116,6 +128,21 @@ public sealed class CursorPlugin : IPlugin
             }
             else Log("WARNING: TickFsrMask not found — falling back to the worker-thread tick only.");
 
+            // The camera's own mouse-delta handler. Patching here is what makes decoupled
+            // cursor mode possible at all: it is the only point that both carries the delta
+            // and can decline to apply it to the view. It is a compiler-generated local
+            // function, so it is matched by prefix rather than by exact name.
+            var fpCam = Type.GetType("Keen.Game2.Client.GameSystems.CameraSystems.Modes.FirstPersonCameraWithInputComponent, Game2.Client");
+            var handleMouse = fpCam?.GetMethods(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                                    .FirstOrDefault(m => m.Name.Contains("HandleMouseDelta"));
+            if (handleMouse != null)
+            {
+                harmony.Patch(handleMouse, prefix: new HarmonyLib.HarmonyMethod(
+                    typeof(CursorPlugin).GetMethod(nameof(MouseDeltaPrefix), BindingFlags.Static | BindingFlags.NonPublic)));
+                Log($"Camera mouse-delta patch applied ({handleMouse.Name}).");
+            }
+            else Log("WARNING: FirstPersonCamera mouse-delta handler not found — decoupled cursor mode cannot suppress the view.");
+
             // Surface construction: hands us the LcdPanelSurface definition (mesh part name,
             // resolution, aspect) without walking grids to find panels.
             var surfaceCtx = Type.GetType("Keen.Game2.Client.WorldObjects.CubeBlocks.Render.Lcd.LcdPanelSurfaceContext, Game2.Client");
@@ -142,6 +169,41 @@ public sealed class CursorPlugin : IPlugin
     private static void LcdRenderPostfix(object __0, object __1)
     {
         try { HostBridge.LcdRenderHook?.Invoke(__0, __1); } catch { }
+    }
+
+    /// <summary>
+    /// Offer the camera's mouse delta to the logic. Returning false skips the original, so
+    /// the view does not move.
+    /// </summary>
+    /// <remarks>
+    /// The parameter is boxed as <see cref="object"/> rather than typed as <c>Vector2</c>: the
+    /// bootstrap deliberately avoids a hard reference to the engine's math types here so that
+    /// a signature change in the engine degrades to "no delta" instead of a patch that fails
+    /// to apply at startup. X and Y are read reflectively, once.
+    /// </remarks>
+    private static void MouseDeltaPrefixCore(object value, out float x, out float y)
+    {
+        x = y = 0f;
+        if (value == null) return;
+        var t = value.GetType();
+        _mdX ??= t.GetField("X");
+        _mdY ??= t.GetField("Y");
+        if (_mdX?.GetValue(value) is float fx) x = fx;
+        if (_mdY?.GetValue(value) is float fy) y = fy;
+    }
+
+    private static FieldInfo _mdX, _mdY;
+
+    private static bool MouseDeltaPrefix(object __0)
+    {
+        try
+        {
+            var hook = HostBridge.MouseDeltaHook;
+            if (hook == null) return true;
+            MouseDeltaPrefixCore(__0, out var x, out var y);
+            return !hook(x, y); // hook returns true when it claims the movement
+        }
+        catch { return true; } // never let our fault freeze the player's view
     }
 
     private static void SurfaceCtorPrefix(object __1)

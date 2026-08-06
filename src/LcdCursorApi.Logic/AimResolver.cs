@@ -58,8 +58,12 @@ internal static class AimResolver
         if (!aiming) ReportNothingFound(tested, noQuad, noFrame, rejects);
         var aimedPanel = aiming ? bestEntry.Id : default;
 
-        EngineLocator.MouseDelta(out float mdx, out float mdy);
-        var buttons = ReadButtons(out bool alt);
+        // Delta comes from the camera's own input path (see MouseDelta below), not from the
+        // OS and not from the engine's pointer state: while the game holds the pointer the OS
+        // cursor does not move, and reading the pointer state cannot stop the camera acting
+        // on the same movement.
+        TakeMouseDelta(out float mdx, out float mdy);
+        var buttons = ReadButtons(out bool modifier);
 
         // Seed the decoupled cursor where the player was already looking, so entering the
         // mode does not teleport the cursor to the panel centre.
@@ -67,8 +71,12 @@ internal static class AimResolver
         float seedX = aiming ? bestU * seedW : 0f, seedY = aiming ? bestV * seedH : 0f;
 
         modes.Update(
-            new CursorModeMachine.Input(alt, (buttons & CursorButtons.Right) != 0, aiming, aimedPanel, mdx, mdy),
+            new CursorModeMachine.Input(modifier, (buttons & CursorButtons.Right) != 0, aiming, aimedPanel, mdx, mdy),
             seedW, seedH, seedX, seedY);
+
+        // Publish whether the camera should be starved this frame. Read by the bootstrap's
+        // mouse-delta prefix, which runs on the input thread.
+        Volatile.Write(ref _captureMouse, modes.CapturesMouse ? 1 : 0);
 
         if (modes.CapturesMouse)
         {
@@ -171,20 +179,58 @@ internal static class AimResolver
     }
 
     private const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02, VK_MBUTTON = 0x04;
-    private const int VK_MENU = 0x12; // either Alt
+    private const int VK_CONTROL = 0x11; // either Ctrl
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
     private static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
-    private static CursorButtons ReadButtons(out bool alt)
+    private static CursorButtons ReadButtons(out bool modifier)
     {
-        alt = Down(VK_MENU);
+        modifier = Down(VK_CONTROL);
         var b = CursorButtons.None;
         if (Down(VK_LBUTTON)) b |= CursorButtons.Left;
         if (Down(VK_RBUTTON)) b |= CursorButtons.Right;
         if (Down(VK_MBUTTON)) b |= CursorButtons.Middle;
         return b;
+    }
+
+    // ------------------------------------------------------------ mouse delta
+
+    private static int _captureMouse;
+    private static float _pendingDx, _pendingDy;
+    private static readonly object DeltaGate = new();
+
+    /// <summary>
+    /// Called by the bootstrap from the camera's mouse-delta handler, on the input thread.
+    /// Returns true to swallow the movement so the view does not turn.
+    /// </summary>
+    /// <remarks>
+    /// Deltas accumulate rather than overwrite: the input thread can deliver several between
+    /// two cursor resolves, and taking only the last would drop most of a fast flick.
+    /// </remarks>
+    public static bool OnCameraMouseDelta(float dx, float dy)
+    {
+        bool capture = Volatile.Read(ref _captureMouse) != 0;
+        if (!capture) return false;
+        lock (DeltaGate) { _pendingDx += dx; _pendingDy += dy; }
+        return true;
+    }
+
+    private static void TakeMouseDelta(out float dx, out float dy)
+    {
+        lock (DeltaGate)
+        {
+            dx = _pendingDx; dy = _pendingDy;
+            _pendingDx = _pendingDy = 0f;
+        }
+    }
+
+    /// <summary>Forget any accumulated movement and stop starving the camera.</summary>
+    public static void ResetMouseCapture()
+    {
+        Volatile.Write(ref _captureMouse, 0);
+        lock (DeltaGate) { _pendingDx = _pendingDy = 0f; }
     }
 }

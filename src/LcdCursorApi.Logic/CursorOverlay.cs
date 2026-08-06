@@ -81,8 +81,13 @@ internal static class CursorOverlay
             if (rt == null) return;
 
             var hit = rt.Current;
-            if (!hit.IsValid) return;
-            if (!PanelRegistry.TryGetByContext(ctx, out var panelId) || panelId != hit.Panel) return;
+            if (!PanelRegistry.TryGetByContext(ctx, out var panelId)) return;
+
+            // Not the aimed panel: draw nothing. The repaint driver keeps this surface
+            // rendering for a moment after the cursor leaves precisely so this no-draw pass
+            // happens and erases the old crosshair — otherwise it stays burned on, which
+            // looks exactly like a second live cursor.
+            if (!hit.IsValid || panelId != hit.Panel) return;
 
             // Keep repainting this context for a moment after the cursor leaves, so the last
             // frame drawn is a clean one rather than a cursor stamped where it used to be.

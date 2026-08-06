@@ -29,12 +29,17 @@ internal sealed class CursorRuntime : ILcdCursorRuntime
         CatalogStore.EnsureLoaded();
         PanelRegistry.Attach(_panels);
         CursorOverlay.Attach(this);
+        HostHooks.Bind(AimResolver.OnCameraMouseDelta);
         HostBridge.LcdTickHook = OnRenderTick;
     }
 
     public void Stop()
     {
         HostBridge.LcdTickHook = null;
+        // Release the camera FIRST. If anything below throws, a player left unable to look
+        // around is the worst possible way to fail.
+        AimResolver.ResetMouseCapture();
+        HostHooks.Unbind();
         CursorOverlay.Detach();
         PanelRegistry.Detach();
         _modes.ForceRelease();

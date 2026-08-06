@@ -8,15 +8,15 @@ namespace LcdCursorApi.Logic;
 /// a decision. That keeps the one piece of this API with real edge-case density testable
 /// without a running game.</para>
 ///
-/// <para><b>The gestures.</b> Holding Alt while aiming at a panel gives momentary decoupled
-/// control that ends when Alt is released. Clicking the right button while Alt is held
-/// latches it, so the player can let go. A latch is escaped by pressing Alt <i>or</i> the
-/// right button — either alone is enough, which also covers repeating the Alt+RightClick
+/// <para><b>The gestures.</b> Holding <b>Ctrl</b> while aiming at a panel gives momentary
+/// decoupled control that ends when Ctrl is released. Clicking the right button while Ctrl is
+/// held latches it, so the player can let go. A latch is escaped by pressing Ctrl <i>or</i> the
+/// right button — either alone is enough, which also covers repeating the Ctrl+RightClick
 /// gesture, since that gesture contains a right-button press.</para>
 ///
 /// <para><b>Why any single key escapes.</b> This mode takes the mouse away from the camera. A
 /// player who triggers it by accident, or who panics, must not have to work out which
-/// combination releases it. Every plausible mash — Alt, right click, or both — exits. The
+/// combination releases it. Every plausible mash — Ctrl, right click, or both — exits. The
 /// cost of an accidental exit is one lost click; the cost of a player being unable to look
 /// around is the whole session.</para>
 /// </remarks>
@@ -25,19 +25,20 @@ internal sealed class CursorModeMachine
     /// <summary>A snapshot of the inputs this machine cares about, taken once per update.</summary>
     internal readonly struct Input
     {
-        /// <summary>Either Alt key held.</summary>
-        public readonly bool Alt;
+        /// <summary>The decoupling modifier — either Ctrl key — held.</summary>
+        public readonly bool Modifier;
         public readonly bool RightButton;
         /// <summary>True when the head-aim ray currently lands on a usable panel.</summary>
         public readonly bool AimingAtPanel;
         /// <summary>The panel under the head-aim ray. Only meaningful when <see cref="AimingAtPanel"/>.</summary>
         public readonly PanelId AimedPanel;
-        /// <summary>Raw mouse delta this update, in device units.</summary>
+        /// <summary>Mouse delta this update, in device units, taken from the camera's own input path.</summary>
         public readonly float MouseDx, MouseDy;
 
-        public Input(bool alt, bool rightButton, bool aimingAtPanel, PanelId aimedPanel, float mouseDx, float mouseDy)
+        public Input(bool modifier, bool rightButton, bool aimingAtPanel, PanelId aimedPanel,
+                     float mouseDx, float mouseDy)
         {
-            Alt = alt;
+            Modifier = modifier;
             RightButton = rightButton;
             AimingAtPanel = aimingAtPanel;
             AimedPanel = aimedPanel;
@@ -49,7 +50,7 @@ internal sealed class CursorModeMachine
     /// <summary>Pixels of cursor travel per unit of mouse delta. Tuned on-glass; a knob, not a constant.</summary>
     public float Sensitivity = 1.0f;
 
-    private bool _prevAlt, _prevRight;
+    private bool _prevModifier, _prevRight;
 
     /// <summary>Cursor position in the locked panel's pixel space while the mouse is driving.</summary>
     private float _x, _y;
@@ -73,29 +74,29 @@ internal sealed class CursorModeMachine
     /// </summary>
     public void Update(in Input input, int panelWidth, int panelHeight, float headAimX, float headAimY)
     {
-        bool altRising = input.Alt && !_prevAlt;
+        bool modifierRising = input.Modifier && !_prevModifier;
         bool rightRising = input.RightButton && !_prevRight;
-        _prevAlt = input.Alt;
+        _prevModifier = input.Modifier;
         _prevRight = input.RightButton;
 
         switch (Mode)
         {
             case CursorMode.HeadAim:
             case CursorMode.None:
-                if (input.Alt && input.AimingAtPanel)
+                if (input.Modifier && input.AimingAtPanel)
                     EnterDecoupled(CursorMode.DecoupledHeld, input.AimedPanel, panelWidth, panelHeight, headAimX, headAimY);
                 break;
 
             case CursorMode.DecoupledHeld:
-                // Alt is already down, so a right press here is the Alt+RightClick gesture.
+                // The modifier is already down, so a right press here is the Ctrl+RightClick gesture.
                 if (rightRising) Mode = CursorMode.DecoupledLatched;
-                else if (!input.Alt) Release();
+                else if (!input.Modifier) Release();
                 break;
 
             case CursorMode.DecoupledLatched:
                 // Any single escape key. Checked before movement so the exit is never
                 // swallowed by the same update that would have moved the cursor.
-                if (altRising || rightRising) Release();
+                if (modifierRising || rightRising) Release();
                 break;
         }
 
