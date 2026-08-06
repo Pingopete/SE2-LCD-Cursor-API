@@ -55,6 +55,11 @@ internal static class CursorOverlay
         HostBridge.LcdRenderHook = null;
         _runtime = null;
         Tracked.Clear();
+
+        // Hand the panels back before this assembly goes away. A private material left
+        // dangling across a reload is what produces the engine's "Can't remove material"
+        // double-release.
+        PrivateMaterial.ReleaseAll();
     }
 
     /// <summary>Contexts that carried a cursor recently, and when. Drives the repaint.</summary>
@@ -178,6 +183,11 @@ internal static class CursorOverlay
                 {
                     if (s == null) continue;
                     if (!PanelRegistry.TryGetByContext(s, out var id) || id != hit.Panel) continue;
+
+                    // First visit only: take this panel off the engine's shared LCD material,
+                    // or our cursor shows up on every panel sharing it.
+                    PrivateMaterial.Ensure(renderComponent, s);
+
                     Tracked[s] = now;
                     anyActive = true;
                     break;

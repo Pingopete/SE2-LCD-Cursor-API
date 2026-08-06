@@ -58,6 +58,12 @@ internal static class Config
     /// <summary>Log why the aim resolve found nothing, every couple of seconds.</summary>
     public static bool DiagnoseAim = true;
 
+    /// <summary>
+    /// Give a panel its own LCD material the first time the cursor lands on it, so the drawn
+    /// cursor cannot appear on another panel sharing the same runtime material.
+    /// </summary>
+    public static bool PrivateMaterial = true;
+
     private static long _lastPoll;
     private static DateTime _stamp;
     private static bool _announced;
@@ -106,6 +112,7 @@ internal static class Config
                     case "showcursor": ShowCursor = ParseBool(val); break;
                     case "suppresshighlight": SuppressHighlight = ParseBool(val); break;
                     case "diagnoseaim": DiagnoseAim = ParseBool(val); break;
+                    case "privatematerial": PrivateMaterial = ParseBool(val); break;
                 }
             }
 
@@ -152,6 +159,12 @@ internal static class Config
 
                 # Log why the aim resolve found nothing, every couple of seconds.
                 diagnoseAim = 1
+
+                # Give a panel its own LCD material the first time the cursor lands on it.
+                # The engine shares runtime materials between panels of the same size and
+                # material, so without this the cursor can appear on a second panel too.
+                # Costs one material per visited panel, once - no render target, no per-move churn.
+                privateMaterial = 1
                 """);
             Log.Line($"Wrote default config to {path}.");
         }
