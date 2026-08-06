@@ -59,10 +59,11 @@ internal static class Config
     public static bool DiagnoseAim = true;
 
     /// <summary>
-    /// Give a panel its own LCD material the first time the cursor lands on it, so the drawn
-    /// cursor cannot appear on another panel sharing the same runtime material.
+    /// Move a panel onto the engine's custom-render path the first time the cursor lands on
+    /// it. That is what gives it a private material and its own render target; panels left on
+    /// the shared material can show another panel's cursor.
     /// </summary>
-    public static bool PrivateMaterial = true;
+    public static bool ForceCustomRender = true;
 
     private static long _lastPoll;
     private static DateTime _stamp;
@@ -112,14 +113,15 @@ internal static class Config
                     case "showcursor": ShowCursor = ParseBool(val); break;
                     case "suppresshighlight": SuppressHighlight = ParseBool(val); break;
                     case "diagnoseaim": DiagnoseAim = ParseBool(val); break;
-                    case "privatematerial": PrivateMaterial = ParseBool(val); break;
+                    case "forcecustomrender": ForceCustomRender = ParseBool(val); break;
                 }
             }
 
             Generation++;
             Log.Line($"Config reloaded (gen {Generation}): faceSign={FaceSign:+0;-0} flipU={FlipU} flipV={FlipV} " +
                      $"swapUv={SwapUv} planeOffset={PlaneOffset:F3} showCursor={ShowCursor} " +
-                     $"suppressHighlight={SuppressHighlight} diagnoseAim={DiagnoseAim}");
+                     $"suppressHighlight={SuppressHighlight} diagnoseAim={DiagnoseAim} " +
+                     $"forceCustomRender={ForceCustomRender}");
         }
         catch (Exception e) { Log.Error("config poll", e); }
     }
@@ -160,11 +162,13 @@ internal static class Config
                 # Log why the aim resolve found nothing, every couple of seconds.
                 diagnoseAim = 1
 
-                # Give a panel its own LCD material the first time the cursor lands on it.
-                # The engine shares runtime materials between panels of the same size and
-                # material, so without this the cursor can appear on a second panel too.
-                # Costs one material per visited panel, once - no render target, no per-move churn.
-                privateMaterial = 1
+                # Move a panel onto the engine's custom-render path when the cursor lands on it.
+                # Panels showing the stock default screen SHARE one runtime material, so a cursor
+                # drawn on one appears on all of them; custom render is the engine's own path to a
+                # private material and a per-panel render target. Same thing that happens when you
+                # switch a panel to text mode by hand. Side effect: such a panel starts showing its
+                # own (possibly empty) content instead of the stock default screen.
+                forceCustomRender = 1
                 """);
             Log.Line($"Wrote default config to {path}.");
         }
