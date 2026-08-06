@@ -40,6 +40,7 @@ internal static class AimResolver
         // Calibration runs BEFORE the quad search and independently of it: the whole point is
         // that the target panel has no quad yet, so nothing would be found to aim at.
         if (Calibration.Active) { ServiceCalibration(eye, forward); return default; }
+        if (Calibration.Selecting) { CheckCalibrationTrigger(eye, forward); return default; }
 
         int tested = 0, noQuad = 0, noFrame = 0;
         Span<int> rejects = stackalloc int[8];
@@ -132,12 +133,24 @@ internal static class AimResolver
     /// </remarks>
     private static void CheckCalibrationTrigger(in Vector3D eye, in Vector3 forward)
     {
-        bool combo = Down(VK_SHIFT) && Down(VK_MENU) && Down(VK_LBUTTON);
+        bool mods = Down(VK_SHIFT) && Down(VK_MENU);
+
+        // Confirm before cycle: both gestures share the modifiers, and testing the confirm
+        // first means a right-click can never be read as another cycle.
+        bool confirm = mods && Down(VK_RBUTTON);
+        bool confirmRising = confirm && !_confirmWasDown;
+        _confirmWasDown = confirm;
+        if (confirmRising && Calibration.Selecting) { Calibration.ConfirmSelection(); return; }
+
+        bool combo = mods && Down(VK_LBUTTON);
         bool rising = combo && !_triggerWasDown;
         _triggerWasDown = combo;
         if (!rising || Calibration.Active) return;
 
-        PanelRegistry.PanelEntry best = null;
+        // Which BLOCK is being looked at. Surfaces are then offered from that block, because a
+        // cockpit's four screens are all at much the same distance and picking between them
+        // geometrically would be a coin toss.
+        long bestBlock = 0;
         double bestScore = double.MaxValue;
 
         foreach (var entry in PanelRegistry.Live)
@@ -146,23 +159,30 @@ internal static class AimResolver
             if (!BlockFrame.TryToModelSpace(entry.Block, eye, forward, out var mo, out var md)) continue;
 
             // Perpendicular distance from the block's model origin to the view ray, plus a
-            // little for distance along it. Good enough to pick which block is being looked at.
+            // little for distance along it. Coarse, but it only has to choose a block.
             double t = -(mo.X * md.X + mo.Y * md.Y + mo.Z * md.Z) / Math.Max(1e-9, md.X * md.X + md.Y * md.Y + md.Z * md.Z);
             if (t <= 0 || t > 12.0) continue; // behind, or too far to be the intended one
             double px = mo.X + md.X * t, py = mo.Y + md.Y * t, pz = mo.Z + md.Z * t;
-            double perp = Math.Sqrt(px * px + py * py + pz * pz);
-            double score = perp + t * 0.05;
-            if (score < bestScore) { bestScore = score; best = entry; }
+            double score = Math.Sqrt(px * px + py * py + pz * pz) + t * 0.05;
+            if (score < bestScore) { bestScore = score; bestBlock = entry.Id.BlockEntityId; }
         }
 
-        if (best == null)
+        if (bestBlock == 0)
         {
             Log.Line("Calibration: no uncalibrated LCD surface near your view. Look at the block and try again.");
             return;
         }
 
-        Calibration.Begin(best.Id, force: false);
+        var indices = PanelRegistry.Live
+            .Where(e => e.Id.BlockEntityId == bestBlock && e.Quad == null)
+            .Select(e => e.Id.SurfaceIndex)
+            .OrderBy(i => i)
+            .ToList();
+
+        Calibration.SelectOrCycle(bestBlock, indices);
     }
+
+    private static bool _confirmWasDown;
 
     /// <summary>
     /// Feed clicks to <see cref="Calibration"/> while it is running.

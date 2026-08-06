@@ -118,6 +118,16 @@ internal static class CursorOverlay
             var hit = rt.Current;
             if (!PanelRegistry.TryGetByContext(ctx, out var panelId)) return;
 
+            // Selection phase: the highlighted surface frames itself so the player can pick by
+            // eye. Without this they would have to know which physical screen is which index,
+            // which is not knowable from inside the cockpit.
+            if (Calibration.Selecting)
+            {
+                if (panelId == Calibration.Candidate && PanelRegistry.TryGet(panelId, out var e))
+                    DrawSelectionFrame(batch, e.Width, e.Height);
+                return;
+            }
+
             // Not the aimed panel: draw nothing. The repaint driver keeps this surface
             // rendering for a moment after the cursor leaves precisely so this no-draw pass
             // happens and erases the old crosshair — otherwise it stays burned on, which
@@ -141,6 +151,39 @@ internal static class CursorOverlay
         {
             if (_errors++ < 3) Log.Error("cursor overlay", e);
         }
+    }
+
+    /// <summary>
+    /// Mark this surface as the one selected for calibration: a thick border plus corner
+    /// brackets at the three corners the player is about to be asked to click, in that order.
+    /// </summary>
+    /// <remarks>
+    /// The brackets are drawn at the render target's own corners, which is where the screen's
+    /// corners are by definition — the mapping from target pixels to glass is what we are
+    /// trying to measure, but the target's extremes are the glass's extremes regardless.
+    /// </remarks>
+    private static void DrawSelectionFrame(IDrawBatch batch, int w, int h)
+    {
+        float W = Math.Max(1, w), H = Math.Max(1, h);
+        float t = Math.Max(3f, MathF.Min(W, H) * 0.02f);   // border thickness
+        float arm = MathF.Min(W, H) * 0.18f;               // corner bracket length
+
+        var frame = new ColorSRGB((byte)255, (byte)200, (byte)40, (byte)255);
+        FillRect(batch, 0, 0, W, t, frame);
+        FillRect(batch, 0, H - t, W, H, frame);
+        FillRect(batch, 0, 0, t, H, frame);
+        FillRect(batch, W - t, 0, W, H, frame);
+
+        // Thicker brackets on the three corners that get clicked, in click order, so the
+        // player can see which corners matter before being asked for them.
+        var mark = new ColorSRGB((byte)255, (byte)255, (byte)255, (byte)255);
+        float b = t * 2.5f;
+        FillRect(batch, 0, 0, arm, b, mark);            // top-left
+        FillRect(batch, 0, 0, b, arm, mark);
+        FillRect(batch, W - arm, 0, W, b, mark);        // top-right
+        FillRect(batch, W - b, 0, W, arm, mark);
+        FillRect(batch, 0, H - b, arm, H, mark);        // bottom-left
+        FillRect(batch, 0, H - arm, b, H, mark);
     }
 
     private static void DrawCrosshair(IDrawBatch batch, float x, float y)
@@ -215,6 +258,29 @@ internal static class CursorOverlay
 
             long now = Environment.TickCount64;
             var hit = rt.Current;
+
+            // While choosing a surface, every surface of the candidate block must keep
+            // rendering — including ones sitting on the shared default screen, which would
+            // otherwise never draw and so never show the selection frame.
+            if (Calibration.Selecting)
+            {
+                bool mine = false;
+                foreach (var s in surfaces)
+                {
+                    if (s == null) continue;
+                    if (!PanelRegistry.TryGetByContext(s, out var sid)) continue;
+                    if (sid.BlockEntityId != Calibration.Candidate.BlockEntityId) continue;
+                    CustomRenderMode.Ensure(renderComponent, s, sid.SurfaceIndex);
+                    mine = true;
+                }
+                if (mine)
+                {
+                    Interlocked.Increment(ref _repaintCalls);
+                    foreach (var s in surfaces)
+                        if (s != null) _rebuild.Invoke(renderComponent, new[] { s });
+                }
+                return;
+            }
 
             // Is the cursor on one of THIS component's surfaces right now?
             bool anyActive = false;

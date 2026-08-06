@@ -45,9 +45,72 @@ internal static class Calibration
 
     private const int SamplesNeeded = 6; // 3 corners x 2 standpoints
 
+    /// <summary>
+    /// Choosing which surface to measure, before any corner is clicked.
+    /// </summary>
+    /// <remarks>
+    /// This phase exists because the target cannot be aimed at — having no quad is the whole
+    /// reason it needs calibrating — so picking "the surface nearest the view ray" would be
+    /// close to arbitrary among a cockpit's four screens, and the player would have no way to
+    /// know which one had been chosen. Instead every surface of the block is made to render
+    /// and the selected one draws a bright frame, so the choice is visible on the glass. The
+    /// player cycles until the right screen lights up. No index needs to be known.
+    /// </remarks>
+    public static bool Selecting { get; private set; }
+
+    /// <summary>The surface currently highlighted for selection. Only meaningful while <see cref="Selecting"/>.</summary>
+    public static PanelId Candidate { get; private set; }
+
     public static bool Active { get; private set; }
     public static PanelId Target { get; private set; }
     public static int Step { get; private set; }
+
+    /// <summary>True while either phase is running, so the caller can suspend normal cursor work.</summary>
+    public static bool Busy => Selecting || Active;
+
+    private static long _blockEntityId;
+
+    /// <summary>
+    /// Begin choosing a surface on the block nearest the view ray, or advance to the next one.
+    /// </summary>
+    public static void SelectOrCycle(long blockEntityId, List<int> surfaceIndices)
+    {
+        if (surfaceIndices.Count == 0) return;
+
+        if (!Selecting || _blockEntityId != blockEntityId)
+        {
+            Selecting = true;
+            Active = false;
+            _blockEntityId = blockEntityId;
+            Candidate = new PanelId(blockEntityId, surfaceIndices[0]);
+            Log.Line($"Calibration: selecting a surface on block {blockEntityId}. The highlighted screen is the one " +
+                     "that will be measured — Shift+Alt+LeftClick cycles, Shift+Alt+RightClick confirms, " +
+                     "right-click cancels.");
+            UpdateSelectPrompt(surfaceIndices);
+            return;
+        }
+
+        int at = surfaceIndices.IndexOf(Candidate.SurfaceIndex);
+        int next = surfaceIndices[(at + 1) % surfaceIndices.Count];
+        Candidate = new PanelId(blockEntityId, next);
+        UpdateSelectPrompt(surfaceIndices);
+    }
+
+    private static void UpdateSelectPrompt(List<int> surfaceIndices)
+    {
+        int at = surfaceIndices.IndexOf(Candidate.SurfaceIndex) + 1;
+        Prompt = $"Calibrate: surface {Candidate.SurfaceIndex} highlighted ({at} of {surfaceIndices.Count}) — " +
+                 "Shift+Alt+LClick to cycle, Shift+Alt+RClick to start";
+        Log.Line(Prompt);
+    }
+
+    /// <summary>Lock in the highlighted surface and start clicking corners.</summary>
+    public static void ConfirmSelection()
+    {
+        if (!Selecting) return;
+        Selecting = false;
+        Begin(Candidate, force: true);
+    }
 
     /// <summary>The prompt to show the player right now, or null when not calibrating.</summary>
     public static string Prompt { get; private set; }
@@ -82,8 +145,9 @@ internal static class Calibration
 
     public static void Cancel(string why)
     {
-        if (!Active) return;
+        if (!Busy) return;
         Active = false;
+        Selecting = false;
         Prompt = null;
         Log.Line($"Calibration cancelled: {why}");
     }
