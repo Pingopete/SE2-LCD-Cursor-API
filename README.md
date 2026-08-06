@@ -90,6 +90,15 @@ hot-reload the wrong copy and ignore every deploy:
 scripts/launch-se2.bat
 ```
 
+Pass `both` to load the RTT plugin alongside it. Cursor-only is the better run when testing
+this mod: both patch the LCD render path, so a fault is harder to attribute.
+
+**One-time setup — clear Steam's launch options** for Space Engineers 2 (Properties →
+General → Launch Options). Steam appends its options to the game even when the exe is
+started directly, so leaving them set both triggers the "launch with parameters" confirmation
+popup every time *and* silently loads whatever plugin they name. With them empty, the script
+is the only thing passing arguments.
+
 Watch `D:\SE2LcdCursor\lcdcursor.log`. In order, it should report the patches applying, the
 runtime publishing, `RebuildSurfaceContent` resolving, panels registering as they come into
 view, and then a one-off line the first time the cursor draws.
