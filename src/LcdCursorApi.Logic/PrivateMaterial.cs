@@ -62,6 +62,8 @@ internal static class PrivateMaterial
 
         try
         {
+            if (IsForeignBound(ctx)) return;
+
             var renderer = Field(renderComponent, "_renderer");
             if (renderer == null) return;
 
@@ -152,6 +154,43 @@ internal static class PrivateMaterial
             Log.Line($"PRIVATE MATERIAL: {restored} panel(s) handed back to the stock material" +
                      (gone > 0 ? $" ({gone} already destroyed)" : "") + ".");
         _bindCount = 0;
+    }
+
+    private static readonly HashSet<string> ForeignLogged = new();
+
+    /// <summary>
+    /// True when another mod already owns this panel's screen material.
+    /// </summary>
+    /// <remarks>
+    /// <para>The RTT Camera plugin rebinds a tagged panel's material through the very same
+    /// <c>SetNewScreenMaterialHandle</c> call so the panel samples its feed's render target.
+    /// If both mods bind the same panel, the last writer wins and the other silently loses —
+    /// which for RTT means a feed panel going blank or showing the wrong texture, a far worse
+    /// outcome than a cursor that can bleed onto a neighbour.</para>
+    ///
+    /// <para>Ownership is read off the surface TEXT, which is how RTT claims panels: an
+    /// <c>[RTT]</c> tag, optionally numbered (<c>[RTT2]</c>), and <c>[RTS]</c> for its mirror.
+    /// Matching the bracket prefix covers all of them. Drawing the cursor on such a panel is
+    /// still fine and often wanted — it is only the material bind that must not be contested.</para>
+    /// </remarks>
+    private static bool IsForeignBound(object ctx)
+    {
+        try
+        {
+            if (Prop(Prop(ctx, "State"), "Text") is not string text || text.Length == 0) return false;
+            if (text.IndexOf("[RTT", StringComparison.OrdinalIgnoreCase) < 0
+             && text.IndexOf("[RTS", StringComparison.OrdinalIgnoreCase) < 0) return false;
+
+            lock (ForeignLogged)
+            {
+                if (ForeignLogged.Add(text.Length > 32 ? text[..32] : text))
+                    Log.Line($"PRIVATE MATERIAL: skipping a panel claimed by another mod (surface text starts " +
+                             $"'{(text.Length > 24 ? text[..24] : text)}'). Its material is left alone; the cursor " +
+                             "still draws on it.");
+            }
+            return true;
+        }
+        catch { return false; }
     }
 
     private static MethodInfo _cloneMi;

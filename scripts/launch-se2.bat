@@ -3,8 +3,8 @@ setlocal
 
 rem Launch SE2 with the LCD Cursor plugin, WITHOUT going through Steam's launch options.
 rem
-rem   scripts\launch-se2.bat          cursor plugin only  (best for testing this mod)
-rem   scripts\launch-se2.bat both     cursor + RTT plugin
+rem   scripts\launch-se2.bat          cursor + RTT plugins  (the normal testing setup)
+rem   scripts\launch-se2.bat solo     cursor plugin only, to attribute a fault to one mod
 rem
 rem ---------------------------------------------------------------------------------
 rem ONE-TIME SETUP: clear Steam's launch options for Space Engineers 2.
@@ -35,11 +35,12 @@ if not exist "%CURSOR_DLL%" (
 )
 
 set "ARGS=-plugins:%CURSOR_DLL%"
-if /i "%~1"=="both" (
+if /i "%~1"=="solo" (
+  echo Loading the cursor plugin ALONE.
+) else (
   if exist "%RTT_DLL%" (
     set "ARGS=-plugins:%CURSOR_DLL% -plugins:%RTT_DLL%"
-    echo Loading BOTH plugins. Note they both patch the LCD render path, so a fault
-    echo is harder to attribute. Prefer the default cursor-only run when testing.
+    echo Loading BOTH plugins: cursor + RTT.
   ) else (
     echo RTT plugin not found at %RTT_DLL% - loading the cursor plugin alone.
   )
