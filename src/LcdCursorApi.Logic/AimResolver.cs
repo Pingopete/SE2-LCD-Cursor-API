@@ -49,7 +49,15 @@ internal static class AimResolver
         {
             tested++;
             if (entry.Quad == null) { noQuad++; continue; } // nothing to project onto
-            if (!BlockFrame.TryToModelSpace(entry.Block, eye, forward, out var mo, out var md)) { noFrame++; continue; }
+            if (!BlockFrame.TryToModelSpace(entry.Block, eye, forward, out var mo, out var md))
+            {
+                noFrame++;
+                // A block that cannot be transformed is gone, not merely unlucky. Retrying it
+                // every frame is how one destroyed panel produced 240 log lines.
+                if (++entry.FrameFailures >= 3) PanelRegistry.Evict(entry.Id, "block no longer resolvable");
+                continue;
+            }
+            entry.FrameFailures = 0;
             if (!ScreenQuadSolver.TryProject(mo, md, entry.Quad, out var u, out var v, out var t, out var why))
             {
                 rejects[(int)why]++;

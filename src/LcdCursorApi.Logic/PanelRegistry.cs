@@ -37,6 +37,9 @@ internal static class PanelRegistry
         public int Width, Height;
         public Guid BlockGuid;
         public string BlockName;
+
+        /// <summary>Consecutive failures to transform into this block's frame. Evicted past a few.</summary>
+        public int FrameFailures;
     }
 
     /// <summary>
@@ -89,6 +92,30 @@ internal static class PanelRegistry
     public static ICollection<PanelEntry> Live => Entries.Values;
 
     public static bool TryGet(PanelId id, out PanelEntry entry) => Entries.TryGetValue(id, out entry);
+
+    /// <summary>
+    /// Forget a panel whose block can no longer be resolved.
+    /// </summary>
+    /// <remarks>
+    /// Registry entries hold the <c>CubeBlockComponent</c> strongly, and a block that is
+    /// destroyed, ground down, or streamed out leaves its entry behind. Touching such an
+    /// entity throws from inside the engine's archetype lookup rather than returning null, so
+    /// a stale entry fails once per panel per frame forever. Eviction is what stops that;
+    /// rate-limiting the log only hides it. The panel re-registers by itself if the block
+    /// comes back, since discovery is driven by the render tick.
+    /// </remarks>
+    public static void Evict(PanelId id, string why)
+    {
+        if (!Entries.TryRemove(id, out _)) return;
+        _panels?.TryRemove(id, out _);
+
+        foreach (var kv in CtxToPanel)
+            if (kv.Value == id) CtxToPanel.TryRemove(kv.Key, out _);
+
+        if (_evictLogs++ < 10) Log.Line($"Panel {id} evicted: {why}.");
+    }
+
+    private static int _evictLogs;
 
     public static bool TryGetByContext(object ctx, out PanelId id) => CtxToPanel.TryGetValue(ctx, out id);
 

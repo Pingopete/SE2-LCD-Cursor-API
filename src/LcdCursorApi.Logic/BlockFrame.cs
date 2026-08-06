@@ -68,6 +68,8 @@ internal static class BlockFrame
         return true;
     }
 
+    private static int _transformErrors;
+
     private static bool TryGetChildTransform(CubeBlockComponent block, out RelativeTransform transform)
     {
         transform = RelativeTransform.Identity;
@@ -80,7 +82,12 @@ internal static class BlockFrame
         }
         catch (Exception e)
         {
-            Log.Error("block child transform", e);
+            // A destroyed or unloaded block throws from inside the engine's archetype lookup
+            // rather than returning null. This runs per panel per frame, so it is logged a
+            // handful of times and then counted: an unbounded log here floods the file and
+            // costs frame time on a path that is already known to be I/O sensitive. The
+            // caller evicts the entry, which is the actual fix.
+            if (_transformErrors++ < 3) Log.Error("block child transform", e);
             return false;
         }
     }
