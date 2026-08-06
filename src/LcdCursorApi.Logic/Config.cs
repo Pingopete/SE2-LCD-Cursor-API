@@ -65,6 +65,12 @@ internal static class Config
     /// </summary>
     public static bool ForceCustomRender = true;
 
+    /// <summary>
+    /// Solve a screen quad from the block model's own mesh when neither the catalog nor an
+    /// <c>LcdPanel</c> dummy supplies one. This is what reaches cockpit and control-seat screens.
+    /// </summary>
+    public static bool BakeFromModel = true;
+
     private static long _lastPoll;
     private static DateTime _stamp;
     private static bool _announced;
@@ -114,6 +120,7 @@ internal static class Config
                     case "suppresshighlight": SuppressHighlight = ParseBool(val); break;
                     case "diagnoseaim": DiagnoseAim = ParseBool(val); break;
                     case "forcecustomrender": ForceCustomRender = ParseBool(val); break;
+                    case "bakefrommodel": BakeFromModel = ParseBool(val); break;
                 }
             }
 
@@ -121,7 +128,7 @@ internal static class Config
             Log.Line($"Config reloaded (gen {Generation}): faceSign={FaceSign:+0;-0} flipU={FlipU} flipV={FlipV} " +
                      $"swapUv={SwapUv} planeOffset={PlaneOffset:F3} showCursor={ShowCursor} " +
                      $"suppressHighlight={SuppressHighlight} diagnoseAim={DiagnoseAim} " +
-                     $"forceCustomRender={ForceCustomRender}");
+                     $"forceCustomRender={ForceCustomRender} bakeFromModel={BakeFromModel}");
         }
         catch (Exception e) { Log.Error("config poll", e); }
     }
@@ -169,6 +176,12 @@ internal static class Config
                 # switch a panel to text mode by hand. Side effect: such a panel starts showing its
                 # own (possibly empty) content instead of the stock default screen.
                 forceCustomRender = 1
+
+                # Solve a screen quad from the block model's own mesh when neither the catalog nor
+                # an LcdPanel dummy has one. This is what gives cockpit and control-seat screens
+                # their geometry with no hand calibration. Results are written to the catalog, so
+                # the work happens once per block type and is served from data thereafter.
+                bakeFromModel = 1
                 """);
             Log.Line($"Wrote default config to {path}.");
         }

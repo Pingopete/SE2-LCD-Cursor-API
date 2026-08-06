@@ -79,6 +79,9 @@ internal static class PanelRegistry
     /// <summary>Block types whose quad has been logged, so it appears once and not per placement.</summary>
     private static readonly ConcurrentDictionary<Guid, byte> QuadLogged = new();
 
+    /// <summary>Surfaces whose bake failure has been reported, so a miss is not logged per placement.</summary>
+    private static readonly ConcurrentDictionary<string, byte> BakeFailLogged = new();
+
     private static double Len(float[] v) => Math.Sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 
     /// <summary>Definition debug names are full content paths; the leaf is what identifies them.</summary>
@@ -239,12 +242,33 @@ internal static class PanelRegistry
             var id = new PanelId(entityId, index);
             int w = surfaceDef.Resolution.X, h = surfaceDef.Resolution.Y;
 
-            // Catalog first as an override, then the block's own LcdPanel dummy. The dummy is
-            // the normal source; a catalog entry exists only where measurement showed the
-            // dummy box and the visible glass disagree.
+            // Three sources, in order of trust:
+            //   1. the catalog      — a measured or previously baked override
+            //   2. the LcdPanel dummy — cheap, and right for every dedicated panel
+            //   3. the model mesh   — exact, and the only thing that reaches cockpit screens
+            // The mesh bake is last because it opens a file, so it should not run for the
+            // panels the first two already answer. Its result is stored, so it runs once per
+            // block type per session and is then served from the catalog.
             var quad = CatalogStore.TryGet(blockGuid, index, out var catalogSurface)
                 ? catalogSurface.Quad
                 : (dummyQuad ??= DummyQuadSource.TryBuild(block, out dummyNote));
+
+            if (quad == null && Config.BakeFromModel)
+            {
+                quad = ModelBaker.TryBake(debugName, surfaceDef.MeshPartName.ToString(), out var bakeNote);
+                if (quad != null)
+                {
+                    CatalogStore.Store(blockGuid, ShortName(debugName), index, quad);
+                    Log.Line($"MODEL BAKE: '{ShortName(debugName)}' surface {index} " +
+                             $"('{surfaceDef.MeshPartName}') solved from the model mesh.");
+                }
+                else if (bakeNote != null && BakeFailLogged.TryAdd($"{blockGuid}#{index}", 0))
+                {
+                    Log.Line($"MODEL BAKE: '{ShortName(debugName)}' surface {index} " +
+                             $"('{surfaceDef.MeshPartName}') could not be solved — {bakeNote}.");
+                }
+            }
+
             if (quad == null) uncatalogued++;
 
             panels[id] = new PanelInfo(id, w, h, surfaceDef.AspectRatio, blockGuid, debugName, quad != null);
