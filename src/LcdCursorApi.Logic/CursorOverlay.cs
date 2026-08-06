@@ -68,6 +68,41 @@ internal static class CursorOverlay
     private static int _errors;
     private static bool _firstDrawLogged;
 
+    private static int _repaintCalls, _drawCalls, _tickCalls;
+    private static long _lastLiveLog;
+
+    /// <summary>Counted from the render tick, for every LCD component, whether or not it repaints.</summary>
+    public static void NoteTick() => Interlocked.Increment(ref _tickCalls);
+
+    /// <summary>
+    /// While the cursor is on a panel, report whether the machinery behind it is actually
+    /// running.
+    /// </summary>
+    /// <remarks>
+    /// This exists to separate three failures that look identical on screen — a cursor that
+    /// is simply absent:
+    /// <list type="bullet">
+    /// <item><b>ticks 0</b> — the engine stopped ticking that panel's render component, so
+    /// nothing of ours runs and the repaint can never restart itself.</item>
+    /// <item><b>ticks &gt; 0, repaints 0</b> — we are running but declining to repaint, so the
+    /// fault is in the active-surface match.</item>
+    /// <item><b>repaints &gt; 0, draws 0</b> — we repaint but the engine never calls Render,
+    /// so the content path is refusing.</item>
+    /// </list>
+    /// Guessing between these has already cost two rounds.
+    /// </remarks>
+    public static void ReportLiveness(PanelId panel)
+    {
+        long now = Environment.TickCount64;
+        if (now - _lastLiveLog < 2000) return;
+        _lastLiveLog = now;
+
+        int ticks = Interlocked.Exchange(ref _tickCalls, 0);
+        int repaints = Interlocked.Exchange(ref _repaintCalls, 0);
+        int draws = Interlocked.Exchange(ref _drawCalls, 0);
+        Log.Line($"Cursor live on {panel}: ticks {ticks}, repaints {repaints}, draws {draws} (last 2s).");
+    }
+
     // ------------------------------------------------------------------ draw
 
     private static void OnRender(object batchObj, object ctxObj)
@@ -99,6 +134,7 @@ internal static class CursorOverlay
                 Log.Line($"Cursor drawing on panel {panelId} at ({hit.X:F0},{hit.Y:F0}).");
             }
 
+            Interlocked.Increment(ref _drawCalls);
             DrawCrosshair(batch, hit.X, hit.Y);
         }
         catch (Exception e)
@@ -212,6 +248,7 @@ internal static class CursorOverlay
                 }
             }
             if (!anyActive) return;
+            Interlocked.Increment(ref _repaintCalls);
 
             // Rebuild every surface of the component, not only the tracked one: contexts get
             // re-created, and a stale reference would otherwise stop repainting silently.

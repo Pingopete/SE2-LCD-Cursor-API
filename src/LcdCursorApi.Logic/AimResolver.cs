@@ -78,6 +78,14 @@ internal static class AimResolver
         // mouse-delta prefix, which runs on the input thread.
         Volatile.Write(ref _captureMouse, modes.CapturesMouse ? 1 : 0);
 
+        if (modes.Mode != _lastMode)
+        {
+            Log.Line($"Cursor mode {_lastMode} -> {modes.Mode} (ctrl={modifier}, aiming={aiming}, " +
+                     $"panel={(aiming ? aimedPanel.ToString() : "none")}, cameraSuppressed={modes.CapturesMouse}, " +
+                     $"hookAvailable={HostHooks.MouseDeltaAvailable}).");
+            _lastMode = modes.Mode;
+        }
+
         if (modes.CapturesMouse)
         {
             // The latched panel, not whatever the head ray finds now: the whole point of the
@@ -91,11 +99,13 @@ internal static class AimResolver
         }
 
         if (!aiming) return default;
+        CursorOverlay.ReportLiveness(bestEntry.Id);
         return new CursorHit(bestEntry.Id, bestU, bestV, bestU * bestEntry.Width, bestV * bestEntry.Height,
                              bestT, CursorMode.HeadAim, buttons);
     }
 
     private static long _lastDiag;
+    private static CursorMode _lastMode = CursorMode.HeadAim;
 
     /// <summary>
     /// Say why nothing was hit. Rate-limited, and only while the answer is still "nothing" —

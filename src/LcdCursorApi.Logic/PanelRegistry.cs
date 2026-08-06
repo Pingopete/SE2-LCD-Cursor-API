@@ -117,6 +117,10 @@ internal static class PanelRegistry
             if (_fLcdBlock.GetValue(renderComponent) is not LcdMultiPanelComponent lcd) return;
             if (_fSurfaces.GetValue(renderComponent) is not Array surfaces || surfaces.Length == 0) return;
 
+            // Counted before anything can return: a tick that happened is evidence even when
+            // it leads to no repaint.
+            CursorOverlay.NoteTick();
+
             // Repaint before the early-out below: a panel whose surfaces are all registered is
             // exactly the panel that may be carrying the cursor and needing a repaint.
             CursorOverlay.DriveRepaint(renderComponent, surfaces);

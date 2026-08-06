@@ -236,8 +236,15 @@ internal static class PrivateMaterial
                 var bare = pt.IsByRef ? pt.GetElementType() : pt;
                 var result = _cloneCtxMi.Invoke(materialDefinition, new[] { Activator.CreateInstance(bare) });
                 if (result != null && !ReferenceEquals(result, materialDefinition)) return result;
+                Log.Line($"PRIVATE MATERIAL: DeepClone({bare.Name}) returned " +
+                         $"{(result == null ? "null" : "the same instance")} — interned definition.");
             }
-            catch { /* fall through to the parameterless form */ }
+            catch (Exception e)
+            {
+                // Was a bare catch, which hid the reason and cost a round of guessing.
+                Log.Line($"PRIVATE MATERIAL: DeepClone(context) threw {e.InnerException?.GetType().Name ?? e.GetType().Name}: " +
+                         $"{e.InnerException?.Message ?? e.Message}");
+            }
         }
 
         return _cloneMi?.Invoke(materialDefinition, null);
