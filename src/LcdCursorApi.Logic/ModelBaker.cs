@@ -43,6 +43,16 @@ internal static class ModelBaker
     private static Type _archiveType, _readerType;
     private static bool _resolved, _unavailable;
 
+    /// <summary>Model files whose part list has been logged, so a miss reports its contents once.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> PartsListLogged = new();
+
+    // UPGRADE PATH, recorded for when modded blocks need this: the engine's ContentCache
+    // (Keen.VRage.Library.Filesystem.ContentCache.ContentCache) holds
+    // _resourceHandleToFileHandle — its own ResourceHandle -> FileHandle map. Resolving the
+    // definition's Model handle through the live instance would replace the folder heuristic
+    // below entirely and work for content mounted from anywhere, including workshop mods.
+    // Needs runtime discovery of the instance; not built while every target block is vanilla.
+
     /// <summary>
     /// Build the quad for one surface from the block's model, or null if it cannot be read.
     /// </summary>
@@ -88,11 +98,13 @@ internal static class ModelBaker
             // Parts index the triangle buffer consecutively, so a running offset gives each
             // part its own slice.
             int offset = 0;
+            var partNames = new List<string>(parts.Length);
             foreach (var p in parts)
             {
                 var pt = p.GetType();
                 int count = (int)(pt.GetField("IndicesCount")?.GetValue(p) ?? 0);
                 string id = pt.GetField("PartId")?.GetValue(p)?.ToString() ?? "";
+                partNames.Add(id);
 
                 if (Matches(id, meshPartName) && count > 0 && offset + count <= tris.Length)
                     return FitQuad(verts, uvs, tris, offset, count, out note);
@@ -101,6 +113,12 @@ internal static class ModelBaker
             }
 
             note = $"mesh part '{meshPartName}' not found in {Path.GetFileName(modelPath)}";
+
+            // Say what IS there, once per model file. The last miss burned a whole round trip
+            // on "not found" with no way to tell a wrong file from a renamed part.
+            if (PartsListLogged.TryAdd(modelPath, 0))
+                Log.Line($"MODEL BAKE: {Path.GetFileName(modelPath)} contains {partNames.Count} part(s): " +
+                         string.Join(", ", partNames.Take(30)) + (partNames.Count > 30 ? ", …" : ""));
             return null;
         }
         catch (Exception e)
@@ -298,17 +316,30 @@ internal static class ModelBaker
             var models = Directory.GetFiles(folder, "*.vrm", SearchOption.AllDirectories);
             if (models.Length == 0) { note = $"no .vrm under {folder}"; return null; }
 
-            var pick = models.FirstOrDefault(m => !IsDamagedVariant(m)) ?? models[0];
+            // Best pristine-variant score wins; ties go to the shortest path (the main model,
+            // not a subpart). This replaced a boolean "is damaged" test that misfired on the
+            // cockpit: its good model lives under "Non_Fractured", and the substring
+            // "_fractured" MATCHES "non_fractured" — so every candidate looked damaged, the
+            // fallback grabbed the first file alphabetically, and that was Deformed. The bake
+            // then honestly reported the display parts missing… from the wrong file.
+            var pick = models.OrderByDescending(Pristineness).ThenBy(m => m.Length).First();
             return pick;
         }
         catch (Exception e) { note = e.Message; return null; }
     }
 
-    private static bool IsDamagedVariant(string path)
+    /// <summary>Higher is better: 2 = explicitly non-fractured, 1 = unmarked, 0 = damaged variant.</summary>
+    private static int Pristineness(string path)
     {
         var p = path.Replace('\\', '/').ToLowerInvariant();
-        return p.Contains("/fractured/") || p.Contains("/deformed/")
-            || p.Contains("_fractured") || p.Contains("_deformed");
+
+        // Consume the "non fractured" token FIRST, in its spelling variants, so the damage
+        // test below cannot match inside it.
+        bool pristine = p.Contains("non_fractured") || p.Contains("nonfractured") || p.Contains("non-fractured");
+        p = p.Replace("non_fractured", "#").Replace("nonfractured", "#").Replace("non-fractured", "#");
+
+        bool damaged = p.Contains("fractured") || p.Contains("deformed") || p.Contains("damaged");
+        return pristine ? 2 : damaged ? 0 : 1;
     }
 
     private static string _gameDataRoot;

@@ -259,8 +259,17 @@ internal static class PanelRegistry
                 if (quad != null)
                 {
                     CatalogStore.Store(blockGuid, ShortName(debugName), index, quad);
+
+                    // Free cross-check: the definition declares an aspect for this surface,
+                    // and the fitted quad has one. Agreement means the fit found the real
+                    // screen; a large disagreement flags a bad fit without anyone squinting
+                    // at a crosshair. (Declared values can be rounded — the wide LCD declares
+                    // 1.33 against true 1.2 — so this logs, never rejects.)
+                    double lenU = Len(quad.EdgeU), lenV = Len(quad.EdgeV);
+                    double fitted = lenV > 1e-6 ? lenU / lenV : 0;
                     Log.Line($"MODEL BAKE: '{ShortName(debugName)}' surface {index} " +
-                             $"('{surfaceDef.MeshPartName}') solved from the model mesh.");
+                             $"('{surfaceDef.MeshPartName}') solved from the model mesh: " +
+                             $"{lenU:F3}m x {lenV:F3}m, aspect {fitted:F2} vs declared {surfaceDef.AspectRatio:F2}.");
                 }
                 else if (bakeNote != null && BakeFailLogged.TryAdd($"{blockGuid}#{index}", 0))
                 {
